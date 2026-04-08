@@ -83,6 +83,9 @@ export const GroupMessage = IDL.Record({
   'groupId' : IDL.Nat,
   'isEdited' : IDL.Bool,
   'timestamp' : Time,
+  'replyToId' : IDL.Opt(IDL.Nat),
+  'reactions' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Principal))),
+  'readBy' : IDL.Vec(IDL.Principal),
 });
 export const Message = IDL.Record({
   'id' : IDL.Nat,
@@ -92,7 +95,10 @@ export const Message = IDL.Record({
   'sender' : IDL.Principal,
   'isEdited' : IDL.Bool,
   'timestamp' : Time,
+  'replyToId' : IDL.Opt(IDL.Nat),
   'receiver' : IDL.Principal,
+  'reactions' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Principal))),
+  'readBy' : IDL.Vec(IDL.Principal),
 });
 export const ProfileFilter = IDL.Record({
   'country' : IDL.Opt(IDL.Text),
@@ -461,11 +467,31 @@ export const idlService = IDL.Service({
   'leaveGroup' : IDL.Func([IDL.Nat], [], []),
   'likePost' : IDL.Func([IDL.Text], [], []),
   'markAllNotificationsAsRead' : IDL.Func([], [], []),
+  'markGroupMessageRead' : IDL.Func(
+      [IDL.Nat, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'markMessageRead' : IDL.Func(
+      [IDL.Principal, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'markNotificationAsRead' : IDL.Func([IDL.Nat], [], []),
   'markStoryAsViewed' : IDL.Func([IDL.Nat], [], []),
   'pinPostToTrending' : IDL.Func([IDL.Text], [], []),
   'pinStory' : IDL.Func(
       [IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'reactToGroupMessage' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Text],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'reactToMessage' : IDL.Func(
+      [IDL.Principal, IDL.Nat, IDL.Text],
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
       [],
     ),
@@ -475,8 +501,16 @@ export const idlService = IDL.Service({
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
   'savePost' : IDL.Func([IDL.Text], [], []),
   'sellRosesToUser' : IDL.Func([IDL.Principal, IDL.Float64], [], []),
-  'sendGroupMessage' : IDL.Func([IDL.Nat, MessageType], [], []),
-  'sendMessage' : IDL.Func([IDL.Principal, MessageType], [], []),
+  'sendGroupMessage' : IDL.Func(
+      [IDL.Nat, MessageType, IDL.Opt(IDL.Nat)],
+      [],
+      [],
+    ),
+  'sendMessage' : IDL.Func(
+      [IDL.Principal, MessageType, IDL.Opt(IDL.Nat)],
+      [],
+      [],
+    ),
   'setStripeConfiguration' : IDL.Func([StripeConfiguration], [], []),
   'transform' : IDL.Func(
       [TransformationInput],
@@ -580,6 +614,9 @@ export const idlFactory = ({ IDL }) => {
     'groupId' : IDL.Nat,
     'isEdited' : IDL.Bool,
     'timestamp' : Time,
+    'replyToId' : IDL.Opt(IDL.Nat),
+    'reactions' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Principal))),
+    'readBy' : IDL.Vec(IDL.Principal),
   });
   const Message = IDL.Record({
     'id' : IDL.Nat,
@@ -589,7 +626,10 @@ export const idlFactory = ({ IDL }) => {
     'sender' : IDL.Principal,
     'isEdited' : IDL.Bool,
     'timestamp' : Time,
+    'replyToId' : IDL.Opt(IDL.Nat),
     'receiver' : IDL.Principal,
+    'reactions' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Principal))),
+    'readBy' : IDL.Vec(IDL.Principal),
   });
   const ProfileFilter = IDL.Record({
     'country' : IDL.Opt(IDL.Text),
@@ -959,11 +999,31 @@ export const idlFactory = ({ IDL }) => {
     'leaveGroup' : IDL.Func([IDL.Nat], [], []),
     'likePost' : IDL.Func([IDL.Text], [], []),
     'markAllNotificationsAsRead' : IDL.Func([], [], []),
+    'markGroupMessageRead' : IDL.Func(
+        [IDL.Nat, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'markMessageRead' : IDL.Func(
+        [IDL.Principal, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'markNotificationAsRead' : IDL.Func([IDL.Nat], [], []),
     'markStoryAsViewed' : IDL.Func([IDL.Nat], [], []),
     'pinPostToTrending' : IDL.Func([IDL.Text], [], []),
     'pinStory' : IDL.Func(
         [IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'reactToGroupMessage' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Text],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'reactToMessage' : IDL.Func(
+        [IDL.Principal, IDL.Nat, IDL.Text],
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
         [],
       ),
@@ -973,8 +1033,16 @@ export const idlFactory = ({ IDL }) => {
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
     'savePost' : IDL.Func([IDL.Text], [], []),
     'sellRosesToUser' : IDL.Func([IDL.Principal, IDL.Float64], [], []),
-    'sendGroupMessage' : IDL.Func([IDL.Nat, MessageType], [], []),
-    'sendMessage' : IDL.Func([IDL.Principal, MessageType], [], []),
+    'sendGroupMessage' : IDL.Func(
+        [IDL.Nat, MessageType, IDL.Opt(IDL.Nat)],
+        [],
+        [],
+      ),
+    'sendMessage' : IDL.Func(
+        [IDL.Principal, MessageType, IDL.Opt(IDL.Nat)],
+        [],
+        [],
+      ),
     'setStripeConfiguration' : IDL.Func([StripeConfiguration], [], []),
     'transform' : IDL.Func(
         [TransformationInput],

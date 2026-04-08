@@ -350,6 +350,37 @@ function CommentsModal({
   );
 }
 
+// Enhanced video player for highlight stories — injects MIME type via source element
+function HighlightVideoPlayer({ videoUrl }: { videoUrl: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    // Clear any stale source children before re-attaching
+    while (video.firstChild) video.removeChild(video.firstChild);
+    const source = document.createElement("source");
+    source.src = videoUrl;
+    source.type = getMimeType(videoUrl);
+    video.appendChild(source);
+    video.load();
+    video.play().catch(() => {
+      /* autoplay may be blocked — controls allow manual play */
+    });
+  }, [videoUrl]);
+
+  return (
+    <video
+      ref={videoRef}
+      className="max-w-full max-h-[75vh] mx-auto rounded-xl"
+      controls
+      playsInline
+      muted
+      preload="metadata"
+    />
+  );
+}
+
 // Story viewer modal for Highlights
 function HighlightStoryModal({
   story,
@@ -358,25 +389,6 @@ function HighlightStoryModal({
   story: Story | null;
   onClose: () => void;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    if (!story || story.content.__kind__ !== "video") return;
-    const video = videoRef.current;
-    if (!video) return;
-    // Clear stale source children before re-attaching
-    while (video.firstChild) video.removeChild(video.firstChild);
-    const src = story.content.video.getDirectURL();
-    const source = document.createElement("source");
-    source.src = src;
-    source.type = getMimeType(src);
-    video.appendChild(source);
-    video.load();
-    video.play().catch(() => {
-      /* autoplay may be blocked on some devices */
-    });
-  }, [story]);
-
   if (!story) return null;
 
   const renderContent = () => {
@@ -390,14 +402,12 @@ function HighlightStoryModal({
       );
     }
     if (story.content.__kind__ === "video") {
+      // Key on story.id ensures the component fully remounts (and the effect re-fires)
+      // every time a different highlight is opened — critical for mobile MIME injection
       return (
-        <video
-          ref={videoRef}
-          className="max-w-full max-h-[75vh] mx-auto rounded-xl"
-          controls
-          playsInline
-          muted
-          preload="metadata"
+        <HighlightVideoPlayer
+          key={story.id.toString()}
+          videoUrl={story.content.video.getDirectURL()}
         />
       );
     }

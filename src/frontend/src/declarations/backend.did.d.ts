@@ -58,6 +58,9 @@ export interface GroupMessage {
   'groupId' : bigint,
   'isEdited' : boolean,
   'timestamp' : Time,
+  'replyToId' : [] | [bigint],
+  'reactions' : Array<[string, Array<Principal>]>,
+  'readBy' : Array<Principal>,
 }
 export interface Message {
   'id' : bigint,
@@ -67,7 +70,10 @@ export interface Message {
   'sender' : Principal,
   'isEdited' : boolean,
   'timestamp' : Time,
+  'replyToId' : [] | [bigint],
   'receiver' : Principal,
+  'reactions' : Array<[string, Array<Principal>]>,
+  'readBy' : Array<Principal>,
 }
 export type MessageType = { 'media' : ExternalBlob } |
   { 'tradeRequest' : TradeRequestMessage } |
@@ -410,18 +416,44 @@ export interface _SERVICE {
   'leaveGroup' : ActorMethod<[bigint], undefined>,
   'likePost' : ActorMethod<[string], undefined>,
   'markAllNotificationsAsRead' : ActorMethod<[], undefined>,
+  'markGroupMessageRead' : ActorMethod<
+    [bigint, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  'markMessageRead' : ActorMethod<
+    [Principal, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'markNotificationAsRead' : ActorMethod<[bigint], undefined>,
   'markStoryAsViewed' : ActorMethod<[bigint], undefined>,
   'pinPostToTrending' : ActorMethod<[string], undefined>,
   'pinStory' : ActorMethod<[bigint], { 'ok' : null } | { 'err' : string }>,
+  'reactToGroupMessage' : ActorMethod<
+    [bigint, bigint, string],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  'reactToMessage' : ActorMethod<
+    [Principal, bigint, string],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'removeGroupParticipant' : ActorMethod<[bigint, Principal], undefined>,
   'requestBuyRoses' : ActorMethod<[number], string>,
   'requestSellRoses' : ActorMethod<[number], string>,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
   'savePost' : ActorMethod<[string], undefined>,
   'sellRosesToUser' : ActorMethod<[Principal, number], undefined>,
-  'sendGroupMessage' : ActorMethod<[bigint, MessageType], undefined>,
-  'sendMessage' : ActorMethod<[Principal, MessageType], undefined>,
+  'sendGroupMessage' : ActorMethod<
+    [bigint, MessageType, [] | [bigint]],
+    undefined
+  >,
+  'sendMessage' : ActorMethod<
+    [Principal, MessageType, [] | [bigint]],
+    undefined
+  >,
   'setStripeConfiguration' : ActorMethod<[StripeConfiguration], undefined>,
   'transform' : ActorMethod<[TransformationInput], TransformationOutput>,
   'unblockUser' : ActorMethod<[Principal], undefined>,

@@ -634,9 +634,14 @@ export function useSendMessage() {
     mutationFn: async ({
       receiver,
       content,
-    }: { receiver: Principal | string; content: any }) => {
+      replyToId,
+    }: { receiver: Principal | string; content: any; replyToId?: bigint }) => {
       if (!actor) throw new Error("Actor not available");
-      await actor.sendMessage(toPrincipal(receiver), content);
+      await actor.sendMessage(
+        toPrincipal(receiver),
+        content,
+        replyToId ?? null,
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -747,6 +752,48 @@ export function useForwardMessage() {
   });
 }
 
+export function useReactToMessage() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      receiver,
+      messageId,
+      emoji,
+    }: { receiver: Principal | string; messageId: bigint; emoji: string }) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.reactToMessage(
+        toPrincipal(receiver),
+        messageId,
+        emoji,
+      );
+      if (result && result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function useMarkMessageRead() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      sender,
+      messageId,
+    }: { sender: Principal | string; messageId: bigint }) => {
+      if (!actor) throw new Error("Actor not available");
+      await actor.markMessageRead(toPrincipal(sender), messageId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
 export function useEditGroupMessage() {
   const { actor } = useActor();
   const queryClient = useQueryClient();
@@ -816,6 +863,48 @@ export function useForwardGroupMessageToConversation() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function useReactToGroupMessage() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      messageId,
+      emoji,
+    }: { groupId: bigint; messageId: bigint; emoji: string }) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.reactToGroupMessage(groupId, messageId, emoji);
+      if (result && result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: (_, { groupId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["groupMessages", groupId.toString()],
+      });
+    },
+  });
+}
+
+export function useMarkGroupMessageRead() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      messageId,
+    }: { groupId: bigint; messageId: bigint }) => {
+      if (!actor) throw new Error("Actor not available");
+      await actor.markGroupMessageRead(groupId, messageId);
+    },
+    onSuccess: (_, { groupId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["groupMessages", groupId.toString()],
+      });
     },
   });
 }
@@ -893,9 +982,10 @@ export function useSendGroupMessage() {
     mutationFn: async ({
       groupId,
       content,
-    }: { groupId: bigint; content: any }) => {
+      replyToId,
+    }: { groupId: bigint; content: any; replyToId?: bigint }) => {
       if (!actor) throw new Error("Actor not available");
-      await actor.sendGroupMessage(groupId, content);
+      await actor.sendGroupMessage(groupId, content, replyToId ?? null);
     },
     onSuccess: (_, { groupId }) => {
       queryClient.invalidateQueries({

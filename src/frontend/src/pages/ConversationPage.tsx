@@ -34,7 +34,9 @@ import {
   Ban,
   Camera,
   Check,
+  CornerUpLeft,
   Edit2,
+  Eye,
   Forward as ForwardIcon,
   Image as ImageIcon,
   LogOut,
@@ -73,6 +75,8 @@ import {
   useGetUserProfile,
   useIsUserBlocked,
   useLeaveConversation,
+  useMarkMessageRead,
+  useReactToMessage,
   useSendMessage,
   useUnblockUser,
 } from "../hooks/useQueries";
@@ -80,6 +84,83 @@ import { isMediaExpired } from "../lib/mediaExpiration";
 import { getMimeType } from "../lib/mimeTypes";
 import { containsProfileLink } from "../lib/profileLinkDetection";
 import { getVideoUploadWarning } from "../lib/videoUploadGuidance";
+
+// Extended Message type to handle optional new backend fields
+type ExtendedMessage = Message & {
+  reactions?: [string, string[]][];
+  readBy?: string[];
+  replyToId?: bigint | null;
+};
+
+const EMOJI_OPTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const;
+
+// Emoji reactions overlay
+function EmojiReactionPicker({
+  onSelect,
+  onClose,
+  isOwn,
+}: {
+  onSelect: (emoji: string) => void;
+  onClose: () => void;
+  isOwn: boolean;
+}) {
+  return (
+    <div
+      className={`absolute bottom-full mb-1 z-50 flex gap-1 bg-card border border-rose-100 rounded-full shadow-lg px-2 py-1 ${isOwn ? "right-0" : "left-0"}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {EMOJI_OPTIONS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          onClick={() => {
+            onSelect(emoji);
+            onClose();
+          }}
+          className="text-lg hover:scale-125 transition-transform p-0.5 rounded-full hover:bg-rose-50"
+          aria-label={`React with ${emoji}`}
+        >
+          {emoji}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Reaction badges below a message
+function ReactionBadges({
+  reactions,
+}: {
+  reactions: [string, string[]][];
+}) {
+  if (!reactions || reactions.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {reactions.map(([emoji, principals]) => (
+        <span
+          key={emoji}
+          className="inline-flex items-center gap-0.5 bg-rose-50 border border-rose-100 rounded-full px-1.5 py-0.5 text-xs"
+        >
+          {emoji}
+          {principals.length > 1 && (
+            <span className="text-rose-600 font-medium">
+              {principals.length}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Reply-to quote block
+function ReplyQuoteBlock({ text }: { text: string }) {
+  return (
+    <div className="border-l-2 border-rose-400 pl-2 mb-1 text-xs text-muted-foreground italic truncate max-w-full">
+      {text}
+    </div>
+  );
+}
 
 // Enhanced video player with unified MIME type handling
 function EnhancedVideoPlayer({
@@ -205,7 +286,7 @@ function EnhancedAudioPlayer({
   );
 }
 
-// Forward message modal — picks a conversation or group to forward to
+// Forward message modal
 type ForwardTarget =
   | { kind: "conversation"; id: bigint; name: string; avatar?: string }
   | { kind: "group"; id: bigint; name: string; avatar?: string };
@@ -326,12 +407,14 @@ function MessageActions({
   onEdit,
   onDelete,
   onForward,
+  onReply,
 }: {
-  message: Message;
+  message: ExtendedMessage;
   isOwn: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onForward: () => void;
+  onReply: () => void;
 }) {
   const isText = message.content.__kind__ === "text";
   const isDeleted = message.isDeleted;
@@ -352,6 +435,12 @@ function MessageActions({
         align={isOwn ? "end" : "start"}
         className="min-w-[140px]"
       >
+        {!isDeleted && (
+          <DropdownMenuItem onClick={onReply} className="gap-2 cursor-pointer">
+            <CornerUpLeft className="h-3.5 w-3.5 text-rose-500" />
+            Reply
+          </DropdownMenuItem>
+        )}
         {!isDeleted && (
           <DropdownMenuItem
             onClick={onForward}
@@ -399,6 +488,8 @@ export default function ConversationPage() {
   const editMessage = useEditMessage();
   const deleteMessage = useDeleteMessage();
   const forwardMessage = useForwardMessage();
+  const reactToMessage = useReactToMessage();
+  const markMessageRead = useMarkMessageRead();
 
   const [messageText, setMessageText] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -415,10 +506,18 @@ export default function ConversationPage() {
   const [forwardingMessage, setForwardingMessage] = useState<Message | null>(
     null,
   );
+  // Emoji reaction picker state
+  const [emojiPickerForId, setEmojiPickerForId] = useState<bigint | null>(null);
+  // Reply state
+  const [replyTo, setReplyTo] = useState<{
+    id: bigint;
+    snippet: string;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Try to parse conversationId as Principal for new chat flow
   let targetPrincipal: Principal | null = null;
@@ -457,18 +556,71 @@ export default function ConversationPage() {
     otherParticipant || Principal.anonymous(),
   );
 
+  const myPrincipal = identity?.getPrincipal().toString() ?? "";
+
+  // Mark incoming messages as read when conversation loads/updates
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally run only when conversation id changes to avoid loops
+  useEffect(() => {
+    if (!conversation || !myPrincipal || !otherParticipant) return;
+    const messages = conversation.messages as ExtendedMessage[];
+    for (const msg of messages) {
+      if (msg.sender.toString() === myPrincipal) continue;
+      if (msg.isDeleted) continue;
+      const readBy = msg.readBy ?? [];
+      if (!readBy.includes(myPrincipal)) {
+        markMessageRead.mutate({
+          sender: msg.sender,
+          messageId: msg.id,
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversation?.id, myPrincipal]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: conversation.messages is the correct dep for scroll-to-bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversation?.messages]);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    if (!emojiPickerForId) return;
+    const handler = () => setEmojiPickerForId(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [emojiPickerForId]);
+
+  const getMessageSnippet = (msg: ExtendedMessage) => {
+    if (msg.content.__kind__ === "text") {
+      return msg.content.text.slice(0, 50);
+    }
+    if (msg.content.__kind__ === "image") return "📷 Image";
+    if (msg.content.__kind__ === "video") return "🎥 Video";
+    if (msg.content.__kind__ === "voice") return "🎤 Voice message";
+    return "Message";
+  };
+
+  // Find the original snippet for a replyToId
+  const getReplySnippet = (replyToId: bigint | null | undefined): string => {
+    if (!replyToId || !conversation) return "Original message";
+    const orig = (conversation.messages as ExtendedMessage[]).find(
+      (m) => m.id === replyToId,
+    );
+    return orig ? getMessageSnippet(orig) : "Original message";
+  };
 
   const handleSendTextMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageText.trim() || !otherParticipant) return;
     const content: MessageType = { __kind__: "text", text: messageText.trim() };
     try {
-      await sendMessage.mutateAsync({ receiver: otherParticipant, content });
+      await sendMessage.mutateAsync({
+        receiver: otherParticipant,
+        content,
+        replyToId: replyTo?.id,
+      });
       setMessageText("");
+      setReplyTo(null);
     } catch {
       toast.error("Failed to send message");
     }
@@ -489,7 +641,9 @@ export default function ConversationPage() {
       await sendMessage.mutateAsync({
         receiver: otherParticipant,
         content: { __kind__: "image", image: blob },
+        replyToId: replyTo?.id,
       });
+      setReplyTo(null);
       toast.success("Image sent!");
     } catch {
       toast.error("Failed to send image");
@@ -516,7 +670,9 @@ export default function ConversationPage() {
       await sendMessage.mutateAsync({
         receiver: otherParticipant,
         content: { __kind__: "video", video: blob },
+        replyToId: replyTo?.id,
       });
+      setReplyTo(null);
       toast.success("Video sent!");
     } catch {
       toast.error("Failed to send video");
@@ -600,7 +756,7 @@ export default function ConversationPage() {
     }
   };
 
-  const handleEditMessage = async (msg: Message) => {
+  const handleEditMessage = async (msg: ExtendedMessage) => {
     if (!conversation) return;
     if (!editText.trim()) return;
     try {
@@ -617,7 +773,7 @@ export default function ConversationPage() {
     }
   };
 
-  const handleDeleteMessage = async (msg: Message) => {
+  const handleDeleteMessage = async (msg: ExtendedMessage) => {
     if (!conversation) return;
     try {
       await deleteMessage.mutateAsync({
@@ -630,7 +786,10 @@ export default function ConversationPage() {
     }
   };
 
-  const handleForwardMessage = async (msg: Message, target: ForwardTarget) => {
+  const handleForwardMessage = async (
+    msg: ExtendedMessage,
+    target: ForwardTarget,
+  ) => {
     if (!conversation) return;
     try {
       if (target.kind === "conversation") {
@@ -652,15 +811,46 @@ export default function ConversationPage() {
     }
   };
 
-  const renderMessage = (message: Message) => {
-    const isOwn =
-      message.sender.toString() === identity?.getPrincipal().toString();
+  const handleReactToMessage = async (msg: ExtendedMessage, emoji: string) => {
+    if (!otherParticipant) return;
+    try {
+      await reactToMessage.mutateAsync({
+        receiver: otherParticipant,
+        messageId: msg.id,
+        emoji,
+      });
+    } catch {
+      // Silent fail — reaction is a nice-to-have
+    }
+  };
+
+  const startLongPress = (msgId: bigint) => {
+    longPressTimerRef.current = setTimeout(() => {
+      setEmojiPickerForId(msgId);
+    }, 500);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const renderMessage = (message: ExtendedMessage) => {
+    const isOwn = message.sender.toString() === myPrincipal;
     const senderProfile = message.senderProfile;
     const senderName =
       senderProfile?.name || `${message.sender.toString().slice(0, 12)}...`;
     const avatarUrl = senderProfile?.profilePicture?.getDirectURL();
     const mediaExpired = isMediaExpired(message.timestamp);
     const isEditing = editingMessageId === message.id;
+    const reactions = message.reactions ?? [];
+    const readBy = message.readBy ?? [];
+    const isSeen =
+      isOwn && otherParticipant && readBy.includes(otherParticipant.toString());
+    const replyToId = message.replyToId ?? null;
+    const showEmojiPicker = emojiPickerForId === message.id;
 
     return (
       <div
@@ -684,151 +874,176 @@ export default function ConversationPage() {
           <div
             className={`flex items-center gap-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
           >
-            <div
-              className={`${isOwn ? "bg-primary text-primary-foreground" : "bg-muted"} rounded-lg p-2 sm:p-3 min-w-0`}
-            >
-              {message.isDeleted ? (
-                <p className="text-xs sm:text-sm italic text-muted-foreground">
-                  [Message deleted]
-                </p>
-              ) : isEditing ? (
-                <div className="flex gap-2 min-w-[200px]">
-                  <Input
-                    value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
-                    className="flex-1 text-xs h-7 bg-background/20 border-0 text-inherit placeholder:text-inherit/60"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleEditMessage(message);
-                      if (e.key === "Escape") {
+            {/* Message bubble with long-press / context-menu for emoji reactions */}
+            <div className="relative">
+              <div
+                className={`${isOwn ? "bg-primary text-primary-foreground" : "bg-muted"} rounded-lg p-2 sm:p-3 min-w-0 cursor-pointer`}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setEmojiPickerForId(message.id);
+                }}
+                onTouchStart={() => startLongPress(message.id)}
+                onTouchEnd={cancelLongPress}
+                onTouchMove={cancelLongPress}
+              >
+                {/* Reply quote */}
+                {replyToId && !message.isDeleted && (
+                  <ReplyQuoteBlock text={getReplySnippet(replyToId)} />
+                )}
+
+                {message.isDeleted ? (
+                  <p className="text-xs sm:text-sm italic text-muted-foreground">
+                    [Message deleted]
+                  </p>
+                ) : isEditing ? (
+                  <div className="flex gap-2 min-w-[200px]">
+                    <Input
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      className="flex-1 text-xs h-7 bg-background/20 border-0 text-inherit placeholder:text-inherit/60"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleEditMessage(message);
+                        if (e.key === "Escape") {
+                          setEditingMessageId(null);
+                          setEditText("");
+                        }
+                      }}
+                      data-ocid="msg-edit-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleEditMessage(message)}
+                      className="text-green-400 hover:text-green-300"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
                         setEditingMessageId(null);
                         setEditText("");
-                      }
-                    }}
-                    data-ocid="msg-edit-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleEditMessage(message)}
-                    className="text-green-400 hover:text-green-300"
-                  >
-                    <Check className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingMessageId(null);
-                      setEditText("");
-                    }}
-                    className="text-muted-foreground/70 hover:text-muted-foreground"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {message.content.__kind__ === "text" &&
-                    (containsProfileLink(message.content.text) ? (
-                      <ProfileLinkMessageText text={message.content.text} />
-                    ) : (
-                      <p className="text-xs sm:text-sm break-words">
-                        {message.content.text}
-                      </p>
-                    ))}
-                  {message.content.__kind__ === "image" &&
-                    (mediaExpired ? (
-                      <ExpiredMediaPlaceholder
-                        mediaType="image"
-                        className="max-w-full"
-                      />
-                    ) : (
-                      <img
-                        src={message.content.image.getDirectURL()}
-                        alt="Shared media"
-                        className="max-w-full rounded max-h-64 sm:max-h-96 object-contain"
-                      />
-                    ))}
-                  {message.content.__kind__ === "video" &&
-                    (mediaExpired ? (
-                      <ExpiredMediaPlaceholder
-                        mediaType="video"
-                        className="max-w-full"
-                      />
-                    ) : (
-                      <EnhancedVideoPlayer
-                        src={message.content.video.getDirectURL()}
-                      />
-                    ))}
-                  {message.content.__kind__ === "voice" &&
-                    (mediaExpired ? (
-                      <ExpiredMediaPlaceholder
-                        mediaType="voice"
-                        className="max-w-full"
-                      />
-                    ) : (
-                      <EnhancedAudioPlayer
-                        src={message.content.voice.getDirectURL()}
-                        type="voice"
-                      />
-                    ))}
-                  {message.content.__kind__ === "media" &&
-                    (mediaExpired ? (
-                      <ExpiredMediaPlaceholder
-                        mediaType="media"
-                        className="max-w-full"
-                      />
-                    ) : (
-                      <EnhancedAudioPlayer
-                        src={message.content.media.getDirectURL()}
-                        type="media"
-                      />
-                    ))}
-                  {message.content.__kind__ === "rose" && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">🌹</span>
-                      <span className="font-semibold">
-                        {message.content.rose.toFixed(2)} Roses
-                      </span>
-                    </div>
-                  )}
-                  {message.content.__kind__ === "receipt" && (
-                    <div className="space-y-1 text-xs sm:text-sm">
-                      <p className="font-semibold">Transaction Receipt</p>
-                      <p>{message.content.receipt.summary}</p>
-                      <p className="text-[10px] sm:text-xs opacity-75">
-                        Fee: {message.content.receipt.fee.toFixed(2)} ROSES
-                      </p>
-                    </div>
-                  )}
-                  {message.content.__kind__ === "tradeRequest" && (
-                    <div className="space-y-1 text-xs sm:text-sm">
-                      <p className="font-semibold">Trade Request</p>
-                      <p>{message.content.tradeRequest.summary}</p>
-                    </div>
-                  )}
-                  {message.content.__kind__ === "forwardedPost" && (
-                    <div className="space-y-2 text-xs sm:text-sm">
-                      <p className="font-semibold flex items-center gap-1">
-                        <ForwardIcon className="h-3 w-3" />
-                        Forwarded Post
-                      </p>
-                      <div className="bg-background/50 rounded p-2">
-                        {message.content.forwardedPost.image && (
-                          <img
-                            src={message.content.forwardedPost.image.getDirectURL()}
-                            alt="Post"
-                            className="w-full rounded mb-2 max-h-32 object-cover"
-                          />
-                        )}
-                        <p className="line-clamp-3">
-                          {message.content.forwardedPost.contentSnippet}
+                      }}
+                      className="text-muted-foreground/70 hover:text-muted-foreground"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {message.content.__kind__ === "text" &&
+                      (containsProfileLink(message.content.text) ? (
+                        <ProfileLinkMessageText text={message.content.text} />
+                      ) : (
+                        <p className="text-xs sm:text-sm break-words">
+                          {message.content.text}
+                        </p>
+                      ))}
+                    {message.content.__kind__ === "image" &&
+                      (mediaExpired ? (
+                        <ExpiredMediaPlaceholder
+                          mediaType="image"
+                          className="max-w-full"
+                        />
+                      ) : (
+                        <img
+                          src={message.content.image.getDirectURL()}
+                          alt="Shared media"
+                          className="max-w-full rounded max-h-64 sm:max-h-96 object-contain"
+                        />
+                      ))}
+                    {message.content.__kind__ === "video" &&
+                      (mediaExpired ? (
+                        <ExpiredMediaPlaceholder
+                          mediaType="video"
+                          className="max-w-full"
+                        />
+                      ) : (
+                        <EnhancedVideoPlayer
+                          src={message.content.video.getDirectURL()}
+                        />
+                      ))}
+                    {message.content.__kind__ === "voice" &&
+                      (mediaExpired ? (
+                        <ExpiredMediaPlaceholder
+                          mediaType="voice"
+                          className="max-w-full"
+                        />
+                      ) : (
+                        <EnhancedAudioPlayer
+                          src={message.content.voice.getDirectURL()}
+                          type="voice"
+                        />
+                      ))}
+                    {message.content.__kind__ === "media" &&
+                      (mediaExpired ? (
+                        <ExpiredMediaPlaceholder
+                          mediaType="media"
+                          className="max-w-full"
+                        />
+                      ) : (
+                        <EnhancedAudioPlayer
+                          src={message.content.media.getDirectURL()}
+                          type="media"
+                        />
+                      ))}
+                    {message.content.__kind__ === "rose" && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">🌹</span>
+                        <span className="font-semibold">
+                          {message.content.rose.toFixed(2)} Roses
+                        </span>
+                      </div>
+                    )}
+                    {message.content.__kind__ === "receipt" && (
+                      <div className="space-y-1 text-xs sm:text-sm">
+                        <p className="font-semibold">Transaction Receipt</p>
+                        <p>{message.content.receipt.summary}</p>
+                        <p className="text-[10px] sm:text-xs opacity-75">
+                          Fee: {message.content.receipt.fee.toFixed(2)} ROSES
                         </p>
                       </div>
-                    </div>
-                  )}
-                </>
+                    )}
+                    {message.content.__kind__ === "tradeRequest" && (
+                      <div className="space-y-1 text-xs sm:text-sm">
+                        <p className="font-semibold">Trade Request</p>
+                        <p>{message.content.tradeRequest.summary}</p>
+                      </div>
+                    )}
+                    {message.content.__kind__ === "forwardedPost" && (
+                      <div className="space-y-2 text-xs sm:text-sm">
+                        <p className="font-semibold flex items-center gap-1">
+                          <ForwardIcon className="h-3 w-3" />
+                          Forwarded Post
+                        </p>
+                        <div className="bg-background/50 rounded p-2">
+                          {message.content.forwardedPost.image && (
+                            <img
+                              src={message.content.forwardedPost.image.getDirectURL()}
+                              alt="Post"
+                              className="w-full rounded mb-2 max-h-32 object-cover"
+                            />
+                          )}
+                          <p className="line-clamp-3">
+                            {message.content.forwardedPost.contentSnippet}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Emoji picker overlay */}
+              {showEmojiPicker && !message.isDeleted && (
+                <EmojiReactionPicker
+                  isOwn={isOwn}
+                  onSelect={(emoji) => handleReactToMessage(message, emoji)}
+                  onClose={() => setEmojiPickerForId(null)}
+                />
               )}
             </div>
-            {/* Action button — subtle, shows on hover/always on mobile */}
+
+            {/* Action button */}
             {!message.isDeleted && (
               <div className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 <MessageActions
@@ -844,10 +1059,20 @@ export default function ConversationPage() {
                   }}
                   onDelete={() => handleDeleteMessage(message)}
                   onForward={() => setForwardingMessage(message)}
+                  onReply={() =>
+                    setReplyTo({
+                      id: message.id,
+                      snippet: getMessageSnippet(message),
+                    })
+                  }
                 />
               </div>
             )}
           </div>
+
+          {/* Reactions */}
+          {reactions.length > 0 && <ReactionBadges reactions={reactions} />}
+
           <div
             className={`flex items-center gap-1.5 mt-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
           >
@@ -859,6 +1084,13 @@ export default function ConversationPage() {
             {message.isEdited && !message.isDeleted && (
               <span className="text-[10px] text-muted-foreground italic">
                 (edited)
+              </span>
+            )}
+            {/* Read receipt */}
+            {isSeen && (
+              <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                <Eye className="h-2.5 w-2.5" />
+                Seen
               </span>
             )}
           </div>
@@ -1010,7 +1242,7 @@ export default function ConversationPage() {
       <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-4 space-y-2">
         {conversation && conversation.messages.length > 0 ? (
           <>
-            {conversation.messages.map(renderMessage)}
+            {(conversation.messages as ExtendedMessage[]).map(renderMessage)}
             <div ref={messagesEndRef} />
           </>
         ) : (
@@ -1038,6 +1270,24 @@ export default function ConversationPage() {
 
       {/* Message Input Area */}
       <div className="border-t bg-card px-3 sm:px-4 py-3 sm:py-4 shrink-0">
+        {/* Reply preview */}
+        {replyTo && (
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-rose-50 border border-rose-100 rounded-lg">
+            <CornerUpLeft className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+            <p className="text-xs text-rose-700 flex-1 truncate">
+              Replying to: {replyTo.snippet}
+            </p>
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              aria-label="Cancel reply"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         {uploadProgress !== null && (
           <div className="mb-2">
             <div className="w-full bg-muted rounded-full h-2">
@@ -1174,7 +1424,10 @@ export default function ConversationPage() {
           onClose={() => setForwardingMessage(null)}
           onForward={(target) => {
             if (forwardingMessage)
-              handleForwardMessage(forwardingMessage, target);
+              handleForwardMessage(
+                forwardingMessage as ExtendedMessage,
+                target,
+              );
           }}
           conversations={
             conversations?.filter((c) => c.id !== conversation?.id) ?? []
@@ -1207,7 +1460,7 @@ export default function ConversationPage() {
             <AlertDialogTitle>Block User</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to block {displayName}? You will no longer
-              see their content and they won't be able to contact you.
+              see their content and they won&apos;t be able to contact you.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

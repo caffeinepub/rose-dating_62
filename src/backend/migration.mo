@@ -1,41 +1,10 @@
 import Map "mo:core/Map";
 import Storage "mo:caffeineai-object-storage/Storage";
-import Time "mo:base/Time";
-import Principal "mo:core/Principal";
 
 module {
-  // ── Old types (inlined from .old/src/backend/main.mo) ──────────────────────
+  // ── Old types (inline, from previous stable signature) ────────────────────
 
-  type OldMessageType = {
-    #text : Text;
-    #image : Storage.ExternalBlob;
-    #video : Storage.ExternalBlob;
-    #voice : Storage.ExternalBlob;
-    #media : Storage.ExternalBlob;
-    #rose : Float;
-    #receipt : {
-      sender : Principal;
-      receiver : Principal;
-      amount : Float;
-      fee : Float;
-      timestamp : Time.Time;
-      summary : Text;
-    };
-    #tradeRequest : {
-      requester : Principal;
-      amount : Float;
-      requestType : Text;
-      timestamp : Time.Time;
-      summary : Text;
-    };
-    #forwardedPost : {
-      postId : Text;
-      author : Principal;
-      contentSnippet : Text;
-      timestamp : Time.Time;
-      image : ?Storage.ExternalBlob;
-    };
-  };
+  type Time = Int;
 
   type OldUserProfile = {
     name : Text;
@@ -47,13 +16,50 @@ module {
     profilePicture : ?Storage.ExternalBlob;
   };
 
+  type OldReceiptMessage = {
+    sender : Principal;
+    receiver : Principal;
+    amount : Float;
+    fee : Float;
+    timestamp : Time;
+    summary : Text;
+  };
+
+  type OldTradeRequestMessage = {
+    requester : Principal;
+    amount : Float;
+    requestType : Text;
+    timestamp : Time;
+    summary : Text;
+  };
+
+  type OldMessageType = {
+    #text : Text;
+    #image : Storage.ExternalBlob;
+    #video : Storage.ExternalBlob;
+    #voice : Storage.ExternalBlob;
+    #media : Storage.ExternalBlob;
+    #rose : Float;
+    #receipt : OldReceiptMessage;
+    #tradeRequest : OldTradeRequestMessage;
+    #forwardedPost : {
+      postId : Text;
+      author : Principal;
+      contentSnippet : Text;
+      timestamp : Time;
+      image : ?Storage.ExternalBlob;
+    };
+  };
+
   type OldMessage = {
     id : Nat;
     sender : Principal;
     receiver : Principal;
     content : OldMessageType;
-    timestamp : Time.Time;
+    timestamp : Time;
     senderProfile : ?OldUserProfile;
+    isEdited : Bool;
+    isDeleted : Bool;
   };
 
   type OldConversation = {
@@ -68,21 +74,26 @@ module {
     groupId : Nat;
     sender : Principal;
     content : OldMessageType;
-    timestamp : Time.Time;
+    timestamp : Time;
     senderProfile : ?OldUserProfile;
+    isEdited : Bool;
+    isDeleted : Bool;
   };
 
-  // ── New types ───────────────────────────────────────────────────────────────
+  // ── New types ──────────────────────────────────────────────────────────────
 
   type NewMessage = {
     id : Nat;
     sender : Principal;
     receiver : Principal;
     content : OldMessageType;
-    timestamp : Time.Time;
+    timestamp : Time;
     senderProfile : ?OldUserProfile;
     isEdited : Bool;
     isDeleted : Bool;
+    reactions : [(Text, [Principal])];
+    readBy : [Principal];
+    replyToId : ?Nat;
   };
 
   type NewConversation = {
@@ -97,44 +108,50 @@ module {
     groupId : Nat;
     sender : Principal;
     content : OldMessageType;
-    timestamp : Time.Time;
+    timestamp : Time;
     senderProfile : ?OldUserProfile;
     isEdited : Bool;
     isDeleted : Bool;
+    reactions : [(Text, [Principal])];
+    readBy : [Principal];
+    replyToId : ?Nat;
   };
 
-  // ── Actor state shapes ──────────────────────────────────────────────────────
+  // ── Actor state shapes ────────────────────────────────────────────────────
 
-  public type OldActor = {
-    conversations : Map.Map<Nat, OldConversation>;
-    groupMessages : Map.Map<Nat, [OldGroupMessage]>;
+  type OldActor = {
+    var conversations : Map.Map<Nat, OldConversation>;
+    var groupMessages : Map.Map<Nat, [OldGroupMessage]>;
   };
 
-  public type NewActor = {
-    conversations : Map.Map<Nat, NewConversation>;
-    groupMessages : Map.Map<Nat, [NewGroupMessage]>;
+  type NewActor = {
+    var conversations : Map.Map<Nat, NewConversation>;
+    var groupMessages : Map.Map<Nat, [NewGroupMessage]>;
   };
 
-  // ── Migration function ──────────────────────────────────────────────────────
+  // ── Migration function ────────────────────────────────────────────────────
 
   public func run(old : OldActor) : NewActor {
-    let conversations = old.conversations.map<Nat, OldConversation, NewConversation>(
+    let newConversations = old.conversations.map<Nat, OldConversation, NewConversation>(
       func(_id, conv) {
-        let newMessages = conv.messages.map(
-          func(msg) { { msg with isEdited = false; isDeleted = false } }
-        );
+        let newMessages = conv.messages.map<OldMessage, NewMessage>(func(msg) {
+          { msg with reactions = []; readBy = []; replyToId = null }
+        });
         { conv with messages = newMessages }
       }
     );
 
-    let groupMessages = old.groupMessages.map<Nat, [OldGroupMessage], [NewGroupMessage]>(
+    let newGroupMessages = old.groupMessages.map<Nat, [OldGroupMessage], [NewGroupMessage]>(
       func(_id, msgs) {
-        msgs.map<OldGroupMessage, NewGroupMessage>(
-          func(msg) { { msg with isEdited = false; isDeleted = false } }
-        )
+        msgs.map<OldGroupMessage, NewGroupMessage>(func(msg) {
+          { msg with reactions = []; readBy = []; replyToId = null }
+        })
       }
     );
 
-    { conversations; groupMessages }
+    {
+      var conversations = newConversations;
+      var groupMessages = newGroupMessages;
+    }
   };
 };

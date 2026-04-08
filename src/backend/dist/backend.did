@@ -236,7 +236,13 @@ type Message =
    id: nat;
    isDeleted: bool;
    isEdited: bool;
+   reactions: vec record {
+                    text;
+                    vec principal;
+                  };
+   readBy: vec principal;
    receiver: principal;
+   replyToId: opt nat;
    sender: principal;
    senderProfile: opt UserProfile;
    timestamp: Time;
@@ -248,6 +254,12 @@ type GroupMessage =
    id: nat;
    isDeleted: bool;
    isEdited: bool;
+   reactions: vec record {
+                    text;
+                    vec principal;
+                  };
+   readBy: vec principal;
+   replyToId: opt nat;
    sender: principal;
    senderProfile: opt UserProfile;
    timestamp: Time;
@@ -428,6 +440,16 @@ service : {
   leaveGroup: (groupId: nat) -> ();
   likePost: (postId: text) -> ();
   markAllNotificationsAsRead: () -> ();
+  markGroupMessageRead: (groupId: nat, messageId: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  markMessageRead: (sender: principal, messageId: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
   markNotificationAsRead: (notificationId: nat) -> ();
   markStoryAsViewed: (storyId: nat) -> ();
   pinPostToTrending: (postId: text) -> ();
@@ -435,14 +457,26 @@ service : {
                                  err: text;
                                  ok;
                                });
+  reactToGroupMessage: (groupId: nat, messageId: nat, emoji: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  reactToMessage: (receiver: principal, messageId: nat, emoji: text) ->
+   (variant {
+      err: text;
+      ok;
+    });
   removeGroupParticipant: (groupId: nat, participant: principal) -> ();
   requestBuyRoses: (amount: float64) -> (text);
   requestSellRoses: (amount: float64) -> (text);
   saveCallerUserProfile: (profile: UserProfile) -> ();
   savePost: (postId: text) -> ();
   sellRosesToUser: (buyer: principal, amount: float64) -> ();
-  sendGroupMessage: (groupId: nat, content: MessageType) -> ();
-  sendMessage: (receiver: principal, content: MessageType) -> ();
+  sendGroupMessage: (groupId: nat, content: MessageType, replyToId:
+   opt nat) -> ();
+  sendMessage: (receiver: principal, content: MessageType, replyToId:
+   opt nat) -> ();
   setStripeConfiguration: (config: StripeConfiguration) -> ();
   transform: (input: TransformationInput) -> (TransformationOutput) query;
   unblockUser: (userToUnblock: principal) -> ();

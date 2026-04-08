@@ -18,7 +18,6 @@ import Runtime "mo:core/Runtime";
 import Migration "migration";
 
 
-
 (with migration = Migration.run)
 actor {
   // Authorization
@@ -754,6 +753,9 @@ actor {
     senderProfile : ?UserProfile;
     isEdited : Bool;
     isDeleted : Bool;
+    reactions : [(Text, [Principal])];
+    readBy : [Principal];
+    replyToId : ?Nat;
   };
 
   var nextGroupId = 0;
@@ -1057,7 +1059,7 @@ actor {
     };
   };
 
-  public shared ({ caller }) func sendGroupMessage(groupId : Nat, content : MessageType) : async () {
+  public shared ({ caller }) func sendGroupMessage(groupId : Nat, content : MessageType, replyToId : ?Nat) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Debug.trap("Unauthorized: Only users can send group messages");
     };
@@ -1097,6 +1099,9 @@ actor {
           senderProfile;
           isEdited = false;
           isDeleted = false;
+          reactions = [];
+          readBy = [];
+          replyToId;
         };
 
         switch (groupMessages.get(groupId)) {
@@ -1228,6 +1233,9 @@ actor {
     senderProfile : ?UserProfile;
     isEdited : Bool;
     isDeleted : Bool;
+    reactions : [(Text, [Principal])];
+    readBy : [Principal];
+    replyToId : ?Nat;
   };
 
   public type Conversation = {
@@ -1262,7 +1270,7 @@ actor {
     };
   };
 
-  public shared ({ caller }) func sendMessage(receiver : Principal, content : MessageType) : async () {
+  public shared ({ caller }) func sendMessage(receiver : Principal, content : MessageType, replyToId : ?Nat) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Debug.trap("Unauthorized: Only users can send messages");
     };
@@ -1324,6 +1332,9 @@ actor {
           senderProfile;
           isEdited = false;
           isDeleted = false;
+          reactions = [];
+          readBy = [];
+          replyToId = null;
         };
 
         func findConversation() : ?(Nat, Conversation) {
@@ -1389,6 +1400,9 @@ actor {
       senderProfile;
       isEdited = false;
       isDeleted = false;
+      reactions = [];
+      readBy = [];
+      replyToId;
     };
 
     func findConversation() : ?(Nat, Conversation) {
@@ -1620,6 +1634,9 @@ actor {
           senderProfile;
           isEdited = false;
           isDeleted = false;
+          reactions = [];
+          readBy = [];
+          replyToId = null;
         };
 
         let updatedMessages = targetConv.messages.concat([forwarded]);
@@ -1766,6 +1783,9 @@ actor {
       senderProfile;
       isEdited = false;
       isDeleted = false;
+      reactions = [];
+      readBy = [];
+      replyToId = null;
     };
 
     switch (groupMessages.get(targetGroupId)) {
@@ -1838,6 +1858,9 @@ actor {
           senderProfile;
           isEdited = false;
           isDeleted = false;
+          reactions = [];
+          readBy = [];
+          replyToId = null;
         };
 
         let updatedMessages = targetConv.messages.concat([forwarded]);
@@ -1873,6 +1896,9 @@ actor {
       senderProfile;
       isEdited = false;
       isDeleted = false;
+      reactions = [];
+      readBy = [];
+      replyToId = null;
     };
 
     func findConversation() : ?(Nat, Conversation) {
@@ -1933,6 +1959,9 @@ actor {
       senderProfile;
       isEdited = false;
       isDeleted = false;
+      reactions = [];
+      readBy = [];
+      replyToId = null;
     };
 
     func findConversation() : ?(Nat, Conversation) {
@@ -2457,7 +2486,7 @@ actor {
                   conv.participants[0]
                 };
 
-                await sendMessage(receiver, #forwardedPost(postDetails));
+                await sendMessage(receiver, #forwardedPost(postDetails), null);
               };
             };
           };
@@ -3293,7 +3322,7 @@ actor {
             case (null, null, _) { true };
             case (_, _, null) { true };
             case (min, max, ?birthYear) {
-              let age = currentYear - birthYear;
+              let age = if (currentYear >= birthYear) { currentYear - birthYear } else { 0 };
               switch (min, max) {
                 case (?minAge, ?maxAge) {
                   age >= minAge and age <= maxAge
@@ -3868,5 +3897,220 @@ actor {
     let content = getUsername(adder) # " added you to " # groupName;
     let notification = createNotification(addedUser, #groupAdd, content, ?groupId.toText(), ?"group");
     addNotification(notification);
+  };
+
+  // ── Message Reactions ────────────────────────────────────────────────────────
+
+  // Toggle an emoji reaction on a direct message. Adds if not present, removes if already reacted.
+  public shared ({ caller }) func reactToMessage(receiver : Principal, messageId : Nat, emoji : Text) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+
+    // Find conversation between caller and receiver
+    var targetConvId : ?Nat = null;
+    for ((convId, conv) in conversations.entries()) {
+      if (conv.participants.size() == 2) {
+        let p1 = conv.participants[0];
+        let p2 = conv.participants[1];
+        if ((p1 == caller and p2 == receiver) or (p1 == receiver and p2 == caller)) {
+          targetConvId := ?convId;
+        };
+      };
+    };
+
+    let convId = switch (targetConvId) {
+      case null { return #err("Conversation not found") };
+      case (?id) id;
+    };
+
+    let conv = switch (conversations.get(convId)) {
+      case null { return #err("Conversation not found") };
+      case (?c) c;
+    };
+
+    var found = false;
+    let updatedMessages = conv.messages.map(func(msg : Message) : Message {
+      if (msg.id == messageId) {
+        found := true;
+        // Toggle: find the emoji entry and add/remove caller
+        var reactionExists = false;
+        let updatedReactions = msg.reactions.map(func(entry) {
+          let (e, principals) = entry;
+          if (e == emoji) {
+            reactionExists := true;
+            let alreadyReacted = principals.find(func(p : Principal) : Bool { p == caller }) != null;
+            if (alreadyReacted) {
+              // Remove caller
+              (e, principals.filter(func(p : Principal) : Bool { p != caller }))
+            } else {
+              // Add caller
+              (e, principals.concat([caller]))
+            }
+          } else {
+            entry
+          }
+        });
+        // If emoji not found yet, append new entry
+        let finalReactions = if (reactionExists) {
+          // Filter out entries with empty principal arrays
+          updatedReactions.filter(func(entry : (Text, [Principal])) : Bool {
+            let (_, principals) = entry;
+            principals.size() > 0
+          })
+        } else {
+          updatedReactions.concat([(emoji, [caller])])
+        };
+        { msg with reactions = finalReactions }
+      } else {
+        msg
+      }
+    });
+
+    if (not found) { return #err("Message not found") };
+
+    conversations.add(convId, { conv with messages = updatedMessages });
+    #ok
+  };
+
+  // Toggle an emoji reaction on a group message.
+  public shared ({ caller }) func reactToGroupMessage(groupId : Nat, messageId : Nat, emoji : Text) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+
+    if (not isGroupParticipant(groupId, caller)) {
+      return #err("Unauthorized: Only group participants can react to messages");
+    };
+
+    let messages = switch (groupMessages.get(groupId)) {
+      case null { return #err("Group not found or no messages") };
+      case (?msgs) msgs;
+    };
+
+    var found = false;
+    let updatedMessages = messages.map(func(msg : GroupMessage) : GroupMessage {
+      if (msg.id == messageId) {
+        found := true;
+        var reactionExists = false;
+        let updatedReactions = msg.reactions.map(func(entry) {
+          let (e, principals) = entry;
+          if (e == emoji) {
+            reactionExists := true;
+            let alreadyReacted = principals.find(func(p : Principal) : Bool { p == caller }) != null;
+            if (alreadyReacted) {
+              (e, principals.filter(func(p : Principal) : Bool { p != caller }))
+            } else {
+              (e, principals.concat([caller]))
+            }
+          } else {
+            entry
+          }
+        });
+        let finalReactions = if (reactionExists) {
+          updatedReactions.filter(func(entry : (Text, [Principal])) : Bool {
+            let (_, principals) = entry;
+            principals.size() > 0
+          })
+        } else {
+          updatedReactions.concat([(emoji, [caller])])
+        };
+        { msg with reactions = finalReactions }
+      } else {
+        msg
+      }
+    });
+
+    if (not found) { return #err("Message not found") };
+
+    groupMessages.add(groupId, updatedMessages);
+    #ok
+  };
+
+  // ── Read Receipts ─────────────────────────────────────────────────────────────
+
+  // Mark a direct message as read by the caller (adds caller to readBy if not already present).
+  public shared ({ caller }) func markMessageRead(sender : Principal, messageId : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+
+    // Find the conversation between sender and caller
+    var targetConvId : ?Nat = null;
+    for ((convId, conv) in conversations.entries()) {
+      if (conv.participants.size() == 2) {
+        let p1 = conv.participants[0];
+        let p2 = conv.participants[1];
+        if ((p1 == caller and p2 == sender) or (p1 == sender and p2 == caller)) {
+          targetConvId := ?convId;
+        };
+      };
+    };
+
+    let convId = switch (targetConvId) {
+      case null { return #err("Conversation not found") };
+      case (?id) id;
+    };
+
+    let conv = switch (conversations.get(convId)) {
+      case null { return #err("Conversation not found") };
+      case (?c) c;
+    };
+
+    var found = false;
+    let updatedMessages = conv.messages.map(func(msg : Message) : Message {
+      if (msg.id == messageId) {
+        found := true;
+        let alreadyRead = msg.readBy.find(func(p : Principal) : Bool { p == caller }) != null;
+        if (alreadyRead) {
+          msg
+        } else {
+          { msg with readBy = msg.readBy.concat([caller]) }
+        }
+      } else {
+        msg
+      }
+    });
+
+    if (not found) { return #err("Message not found") };
+
+    conversations.add(convId, { conv with messages = updatedMessages });
+    #ok
+  };
+
+  // Mark a group message as read by the caller.
+  public shared ({ caller }) func markGroupMessageRead(groupId : Nat, messageId : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized");
+    };
+
+    if (not isGroupParticipant(groupId, caller)) {
+      return #err("Unauthorized: Only group participants can mark messages as read");
+    };
+
+    let messages = switch (groupMessages.get(groupId)) {
+      case null { return #err("Group not found or no messages") };
+      case (?msgs) msgs;
+    };
+
+    var found = false;
+    let updatedMessages = messages.map(func(msg : GroupMessage) : GroupMessage {
+      if (msg.id == messageId) {
+        found := true;
+        let alreadyRead = msg.readBy.find(func(p : Principal) : Bool { p == caller }) != null;
+        if (alreadyRead) {
+          msg
+        } else {
+          { msg with readBy = msg.readBy.concat([caller]) }
+        }
+      } else {
+        msg
+      }
+    });
+
+    if (not found) { return #err("Message not found") };
+
+    groupMessages.add(groupId, updatedMessages);
+    #ok
   };
 };

@@ -140,6 +140,9 @@ export interface GroupMessage {
     groupId: bigint;
     isEdited: boolean;
     timestamp: Time;
+    replyToId?: bigint;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }
 export interface AnalyticsSummary {
     activeUsers: bigint;
@@ -327,7 +330,10 @@ export interface Message {
     sender: Principal;
     isEdited: boolean;
     timestamp: Time;
+    replyToId?: bigint;
     receiver: Principal;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }
 export interface ProfileFilter {
     country?: string;
@@ -515,10 +521,38 @@ export interface backendInterface {
     leaveGroup(groupId: bigint): Promise<void>;
     likePost(postId: string): Promise<void>;
     markAllNotificationsAsRead(): Promise<void>;
+    markGroupMessageRead(groupId: bigint, messageId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    markMessageRead(sender: Principal, messageId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     markNotificationAsRead(notificationId: bigint): Promise<void>;
     markStoryAsViewed(storyId: bigint): Promise<void>;
     pinPostToTrending(postId: string): Promise<void>;
     pinStory(storyId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    reactToGroupMessage(groupId: bigint, messageId: bigint, emoji: string): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    reactToMessage(receiver: Principal, messageId: bigint, emoji: string): Promise<{
         __kind__: "ok";
         ok: null;
     } | {
@@ -531,8 +565,8 @@ export interface backendInterface {
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
     savePost(postId: string): Promise<void>;
     sellRosesToUser(buyer: Principal, amount: number): Promise<void>;
-    sendGroupMessage(groupId: bigint, content: MessageType): Promise<void>;
-    sendMessage(receiver: Principal, content: MessageType): Promise<void>;
+    sendGroupMessage(groupId: bigint, content: MessageType, replyToId: bigint | null): Promise<void>;
+    sendMessage(receiver: Principal, content: MessageType, replyToId: bigint | null): Promise<void>;
     setStripeConfiguration(config: StripeConfiguration): Promise<void>;
     transform(input: TransformationInput): Promise<TransformationOutput>;
     unblockUser(userToUnblock: Principal): Promise<void>;
@@ -1743,6 +1777,46 @@ export class Backend implements backendInterface {
             return result;
         }
     }
+    async markGroupMessageRead(arg0: bigint, arg1: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.markGroupMessageRead(arg0, arg1);
+                return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.markGroupMessageRead(arg0, arg1);
+            return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async markMessageRead(arg0: Principal, arg1: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.markMessageRead(arg0, arg1);
+                return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.markMessageRead(arg0, arg1);
+            return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+        }
+    }
     async markNotificationAsRead(arg0: bigint): Promise<void> {
         if (this.processError) {
             try {
@@ -1802,6 +1876,46 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.pinStory(arg0);
+            return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async reactToGroupMessage(arg0: bigint, arg1: bigint, arg2: string): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.reactToGroupMessage(arg0, arg1, arg2);
+                return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.reactToGroupMessage(arg0, arg1, arg2);
+            return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async reactToMessage(arg0: Principal, arg1: bigint, arg2: string): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.reactToMessage(arg0, arg1, arg2);
+                return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.reactToMessage(arg0, arg1, arg2);
             return from_candid_variant_n16(this._uploadFile, this._downloadFile, result);
         }
     }
@@ -1889,31 +2003,31 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async sendGroupMessage(arg0: bigint, arg1: MessageType): Promise<void> {
+    async sendGroupMessage(arg0: bigint, arg1: MessageType, arg2: bigint | null): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.sendGroupMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1));
+                const result = await this.actor.sendGroupMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1), to_candid_opt_n10(this._uploadFile, this._downloadFile, arg2));
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.sendGroupMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1));
+            const result = await this.actor.sendGroupMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1), to_candid_opt_n10(this._uploadFile, this._downloadFile, arg2));
             return result;
         }
     }
-    async sendMessage(arg0: Principal, arg1: MessageType): Promise<void> {
+    async sendMessage(arg0: Principal, arg1: MessageType, arg2: bigint | null): Promise<void> {
         if (this.processError) {
             try {
-                const result = await this.actor.sendMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1));
+                const result = await this.actor.sendMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1), to_candid_opt_n10(this._uploadFile, this._downloadFile, arg2));
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.sendMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1));
+            const result = await this.actor.sendMessage(arg0, await to_candid_MessageType_n13(this._uploadFile, this._downloadFile, arg1), to_candid_opt_n10(this._uploadFile, this._downloadFile, arg2));
             return result;
         }
     }
@@ -2165,6 +2279,9 @@ async function from_candid_record_n19(_uploadFile: (file: ExternalBlob) => Promi
     groupId: bigint;
     isEdited: boolean;
     timestamp: _Time;
+    replyToId: [] | [bigint];
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }): Promise<{
     id: bigint;
     isDeleted: boolean;
@@ -2174,6 +2291,9 @@ async function from_candid_record_n19(_uploadFile: (file: ExternalBlob) => Promi
     groupId: bigint;
     isEdited: boolean;
     timestamp: Time;
+    replyToId?: bigint;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }> {
     return {
         id: value.id,
@@ -2183,7 +2303,10 @@ async function from_candid_record_n19(_uploadFile: (file: ExternalBlob) => Promi
         sender: value.sender,
         groupId: value.groupId,
         isEdited: value.isEdited,
-        timestamp: value.timestamp
+        timestamp: value.timestamp,
+        replyToId: record_opt_to_undefined(from_candid_opt_n7(_uploadFile, _downloadFile, value.replyToId)),
+        reactions: value.reactions,
+        readBy: value.readBy
     };
 }
 async function from_candid_record_n23(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
@@ -2242,7 +2365,10 @@ async function from_candid_record_n31(_uploadFile: (file: ExternalBlob) => Promi
     sender: Principal;
     isEdited: boolean;
     timestamp: _Time;
+    replyToId: [] | [bigint];
     receiver: Principal;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }): Promise<{
     id: bigint;
     isDeleted: boolean;
@@ -2251,7 +2377,10 @@ async function from_candid_record_n31(_uploadFile: (file: ExternalBlob) => Promi
     sender: Principal;
     isEdited: boolean;
     timestamp: Time;
+    replyToId?: bigint;
     receiver: Principal;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }> {
     return {
         id: value.id,
@@ -2261,7 +2390,10 @@ async function from_candid_record_n31(_uploadFile: (file: ExternalBlob) => Promi
         sender: value.sender,
         isEdited: value.isEdited,
         timestamp: value.timestamp,
-        receiver: value.receiver
+        replyToId: record_opt_to_undefined(from_candid_opt_n7(_uploadFile, _downloadFile, value.replyToId)),
+        receiver: value.receiver,
+        reactions: value.reactions,
+        readBy: value.readBy
     };
 }
 async function from_candid_record_n36(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {

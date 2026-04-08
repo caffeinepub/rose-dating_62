@@ -44,6 +44,9 @@ type GroupMessage__423684362 =
     id : Nat;
     isDeleted : Bool;
     isEdited : Bool;
+    reactions : [(Text, [Principal])];
+    readBy : [Principal];
+    replyToId : ?Nat;
     sender : Principal;
     senderProfile : ?UserProfile__491224006;
     timestamp : Time__38388344
@@ -82,7 +85,10 @@ type Message__19119041 =
     id : Nat;
     isDeleted : Bool;
     isEdited : Bool;
+    reactions : [(Text, [Principal])];
+    readBy : [Principal];
     receiver : Principal;
+    replyToId : ?Nat;
     sender : Principal;
     senderProfile : ?UserProfile__491224006;
     timestamp : Time__38388344
@@ -129,9 +135,11 @@ type OldGroupMessage__940783339 =
     content : OldMessageType__519610819;
     groupId : Nat;
     id : Nat;
+    isDeleted : Bool;
+    isEdited : Bool;
     sender : Principal;
     senderProfile : ?OldUserProfile__416069324;
-    timestamp : Time__38388344
+    timestamp : Time__976142243
   };
 type OldMessageType__519610819 =
   {
@@ -141,29 +149,14 @@ type OldMessageType__519610819 =
         contentSnippet : Text;
         image : ?ExternalBlob__246066408;
         postId : Text;
-        timestamp : Time__38388344
+        timestamp : Time__976142243
       };
     #image : ExternalBlob__246066408;
     #media : ExternalBlob__246066408;
-    #receipt :
-      {
-        amount : Float;
-        fee : Float;
-        receiver : Principal;
-        sender : Principal;
-        summary : Text;
-        timestamp : Time__38388344
-      };
+    #receipt : OldReceiptMessage__881183049;
     #rose : Float;
     #text : Text;
-    #tradeRequest :
-      {
-        amount : Float;
-        requestType : Text;
-        requester : Principal;
-        summary : Text;
-        timestamp : Time__38388344
-      };
+    #tradeRequest : OldTradeRequestMessage__107377972;
     #video : ExternalBlob__246066408;
     #voice : ExternalBlob__246066408
   };
@@ -171,10 +164,29 @@ type OldMessage__897832057 =
   {
     content : OldMessageType__519610819;
     id : Nat;
+    isDeleted : Bool;
+    isEdited : Bool;
     receiver : Principal;
     sender : Principal;
     senderProfile : ?OldUserProfile__416069324;
-    timestamp : Time__38388344
+    timestamp : Time__976142243
+  };
+type OldReceiptMessage__881183049 =
+  {
+    amount : Float;
+    fee : Float;
+    receiver : Principal;
+    sender : Principal;
+    summary : Text;
+    timestamp : Time__976142243
+  };
+type OldTradeRequestMessage__107377972 =
+  {
+    amount : Float;
+    requestType : Text;
+    requester : Principal;
+    summary : Text;
+    timestamp : Time__976142243
   };
 type OldUserProfile__416069324 =
   {
@@ -236,6 +248,7 @@ type Story__270542992 =
 type StripeConfiguration__96897619 =
   {allowedCountries : [Text]; secretKey : Text};
 type Time__38388344 = Int;
+type Time__976142243 = Int;
 type TradeRequestMessage__809530092 =
   {
     amount : Float;
@@ -273,7 +286,7 @@ actor ({
       var root : Node__46230540<Text, [CommentInteraction__393041]>;
       var size : Nat__490723111
     };
-  in conversations : Map__605269027<Nat, OldConversation__937823799>;
+  in var conversations : Map__605269027<Nat, OldConversation__937823799>;
   stable exchangeRateUpdateInterval : Int;
   stable var followersMap :
     {
@@ -295,7 +308,7 @@ actor ({
       var root : Node__46230540<Nat, GroupChat__82569430>;
       var size : Nat__490723111
     };
-  in groupMessages : Map__605269027<Nat, [OldGroupMessage__940783339]>;
+  in var groupMessages : Map__605269027<Nat, [OldGroupMessage__940783339]>;
   stable var icpUsdExchangeRate : ?Float;
   stable var lastExchangeRateUpdate : ?Time__38388344;
   stable var likesMap :

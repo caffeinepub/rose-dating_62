@@ -19,8 +19,10 @@ import {
   ArrowLeft,
   Check,
   ChevronDown,
+  CornerUpLeft,
   Crown,
   Edit2,
+  Eye,
   Forward as ForwardIcon,
   Image as ImageIcon,
   LogOut,
@@ -53,6 +55,8 @@ import {
   useGetGroupMessages,
   useGetUserProfile,
   useLeaveGroup,
+  useMarkGroupMessageRead,
+  useReactToGroupMessage,
   useRemoveGroupParticipant,
   useSendGroupMessage,
   useUpdateGroupAvatar,
@@ -62,8 +66,80 @@ import { isMediaExpired } from "../lib/mediaExpiration";
 import { getMimeType } from "../lib/mimeTypes";
 
 const MEMBERS_PAGE_SIZE = 19;
+const EMOJI_OPTIONS = ["❤️", "😂", "😮", "😢", "😡", "👍"] as const;
 
-// Enhanced video player for group messages — clears stale source children before appending
+// Extended GroupMessage type to handle optional new backend fields
+type ExtendedGroupMessage = GroupMessage & {
+  reactions?: [string, string[]][];
+  readBy?: string[];
+  replyToId?: bigint | null;
+};
+
+// Emoji reactions overlay
+function EmojiReactionPicker({
+  onSelect,
+  onClose,
+  isOwn,
+}: {
+  onSelect: (emoji: string) => void;
+  onClose: () => void;
+  isOwn: boolean;
+}) {
+  return (
+    <div
+      className={`absolute bottom-full mb-1 z-50 flex gap-1 bg-card border border-rose-100 rounded-full shadow-lg px-2 py-1 ${isOwn ? "right-0" : "left-0"}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {EMOJI_OPTIONS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          onClick={() => {
+            onSelect(emoji);
+            onClose();
+          }}
+          className="text-lg hover:scale-125 transition-transform p-0.5 rounded-full hover:bg-rose-50"
+          aria-label={`React with ${emoji}`}
+        >
+          {emoji}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Reaction badges below a message
+function ReactionBadges({ reactions }: { reactions: [string, string[]][] }) {
+  if (!reactions || reactions.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 mt-1">
+      {reactions.map(([emoji, principals]) => (
+        <span
+          key={emoji}
+          className="inline-flex items-center gap-0.5 bg-rose-50 border border-rose-100 rounded-full px-1.5 py-0.5 text-xs"
+        >
+          {emoji}
+          {principals.length > 1 && (
+            <span className="text-rose-600 font-medium">
+              {principals.length}
+            </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Reply-to quote block
+function ReplyQuoteBlock({ text }: { text: string }) {
+  return (
+    <div className="border-l-2 border-rose-400 pl-2 mb-1 text-xs text-muted-foreground italic truncate max-w-full">
+      {text}
+    </div>
+  );
+}
+
+// Enhanced video player for group messages
 function GroupVideoPlayer({ blob }: { blob: ExternalBlob }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -173,7 +249,7 @@ type ForwardTarget = {
   avatar?: string;
 };
 
-// Forward message modal for groups (only to direct conversations)
+// Forward message modal for groups
 function ForwardGroupMessageModal({
   open,
   onClose,
@@ -279,12 +355,14 @@ function GroupMessageActions({
   onEdit,
   onDelete,
   onForward,
+  onReply,
 }: {
-  message: GroupMessage;
+  message: ExtendedGroupMessage;
   isOwn: boolean;
   onEdit: () => void;
   onDelete: () => void;
   onForward: () => void;
+  onReply: () => void;
 }) {
   const isText = message.content.__kind__ === "text";
   const isDeleted = message.isDeleted;
@@ -305,6 +383,12 @@ function GroupMessageActions({
         align={isOwn ? "end" : "start"}
         className="min-w-[140px]"
       >
+        {!isDeleted && (
+          <DropdownMenuItem onClick={onReply} className="gap-2 cursor-pointer">
+            <CornerUpLeft className="h-3.5 w-3.5 text-rose-500" />
+            Reply
+          </DropdownMenuItem>
+        )}
         {!isDeleted && (
           <DropdownMenuItem
             onClick={onForward}
@@ -615,6 +699,8 @@ export default function GroupChatPage() {
   const editGroupMessage = useEditGroupMessage();
   const deleteGroupMessage = useDeleteGroupMessage();
   const forwardGroupMessage = useForwardGroupMessageToConversation();
+  const reactToGroupMessage = useReactToGroupMessage();
+  const markGroupMessageRead = useMarkGroupMessageRead();
 
   const [showSettings, setShowSettings] = useState(false);
   const [messageText, setMessageText] = useState("");
@@ -629,12 +715,20 @@ export default function GroupChatPage() {
   const [editingMessageId, setEditingMessageId] = useState<bigint | null>(null);
   const [editText, setEditText] = useState("");
   const [forwardingMessage, setForwardingMessage] =
-    useState<GroupMessage | null>(null);
+    useState<ExtendedGroupMessage | null>(null);
+  // Emoji reaction picker state
+  const [emojiPickerForId, setEmojiPickerForId] = useState<bigint | null>(null);
+  // Reply state
+  const [replyTo, setReplyTo] = useState<{
+    id: bigint;
+    snippet: string;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoFileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: messages is the correct dep for scroll-to-bottom
   useEffect(() => {
@@ -645,6 +739,32 @@ export default function GroupChatPage() {
   useEffect(() => {
     setVisibleMembers(MEMBERS_PAGE_SIZE);
   }, [memberSearch]);
+
+  // Mark incoming messages as read when group chat loads
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally run only on groupId change
+  useEffect(() => {
+    if (!currentPrincipal || messages.length === 0) return;
+    const extMessages = messages as ExtendedGroupMessage[];
+    for (const msg of extMessages) {
+      if (msg.sender.toString() === currentPrincipal) continue;
+      if (msg.isDeleted) continue;
+      const readBy = msg.readBy ?? [];
+      if (!readBy.includes(currentPrincipal)) {
+        markGroupMessageRead.mutate({
+          groupId: groupIdBigInt,
+          messageId: msg.id,
+        });
+      }
+    }
+  }, [groupIdBigInt.toString(), currentPrincipal]);
+
+  // Close emoji picker on outside click
+  useEffect(() => {
+    if (!emojiPickerForId) return;
+    const handler = () => setEmojiPickerForId(null);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, [emojiPickerForId]);
 
   const isAdmin =
     group?.admins.some((a) => a.toString() === currentPrincipal) ?? false;
@@ -681,14 +801,45 @@ export default function GroupChatPage() {
     return contacts;
   }, [conversations, allParticipants, currentPrincipal]);
 
+  const getMessageSnippet = (msg: ExtendedGroupMessage): string => {
+    if (msg.content.__kind__ === "text") return msg.content.text.slice(0, 50);
+    if (msg.content.__kind__ === "image") return "📷 Image";
+    if (msg.content.__kind__ === "video") return "🎥 Video";
+    if (msg.content.__kind__ === "voice") return "🎤 Voice message";
+    return "Message";
+  };
+
+  const getReplySnippet = (replyToId: bigint | null | undefined): string => {
+    if (!replyToId) return "Original message";
+    const orig = (messages as ExtendedGroupMessage[]).find(
+      (m) => m.id === replyToId,
+    );
+    return orig ? getMessageSnippet(orig) : "Original message";
+  };
+
+  const startLongPress = (msgId: bigint) => {
+    longPressTimerRef.current = setTimeout(() => {
+      setEmojiPickerForId(msgId);
+    }, 500);
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   const handleSendText = async () => {
     if (!messageText.trim()) return;
     try {
       await sendMessageMutation.mutateAsync({
         groupId: groupIdBigInt,
         content: { __kind__: "text", text: messageText.trim() },
+        replyToId: replyTo?.id,
       });
       setMessageText("");
+      setReplyTo(null);
     } catch (err: unknown) {
       toast.error((err as Error).message || "Failed to send message");
     }
@@ -837,7 +988,7 @@ export default function GroupChatPage() {
     }
   };
 
-  const handleEditGroupMessage = async (msg: GroupMessage) => {
+  const handleEditGroupMessage = async (msg: ExtendedGroupMessage) => {
     if (!editText.trim()) return;
     try {
       await editGroupMessage.mutateAsync({
@@ -853,7 +1004,7 @@ export default function GroupChatPage() {
     }
   };
 
-  const handleDeleteGroupMessage = async (msg: GroupMessage) => {
+  const handleDeleteGroupMessage = async (msg: ExtendedGroupMessage) => {
     try {
       await deleteGroupMessage.mutateAsync({
         groupId: groupIdBigInt,
@@ -866,7 +1017,7 @@ export default function GroupChatPage() {
   };
 
   const handleForwardGroupMessage = async (
-    msg: GroupMessage,
+    msg: ExtendedGroupMessage,
     target: ForwardTarget,
   ) => {
     try {
@@ -878,6 +1029,21 @@ export default function GroupChatPage() {
       toast.success(`Forwarded to ${target.name}`);
     } catch {
       toast.error("Failed to forward message");
+    }
+  };
+
+  const handleReactToGroupMessage = async (
+    msg: ExtendedGroupMessage,
+    emoji: string,
+  ) => {
+    try {
+      await reactToGroupMessage.mutateAsync({
+        groupId: groupIdBigInt,
+        messageId: msg.id,
+        emoji,
+      });
+    } catch {
+      // Silent fail — reaction is a nice-to-have
     }
   };
 
@@ -1015,9 +1181,20 @@ export default function GroupChatPage() {
             </p>
           </div>
         ) : (
-          messages.map((msg) => {
+          (messages as ExtendedGroupMessage[]).map((msg) => {
             const isOwn = msg.sender.toString() === currentPrincipal;
             const isEditing = editingMessageId === msg.id;
+            const reactions = msg.reactions ?? [];
+            const readBy = msg.readBy ?? [];
+            const isSeen =
+              isOwn &&
+              group.participants.some(
+                (p) =>
+                  p.toString() !== currentPrincipal &&
+                  readBy.includes(p.toString()),
+              );
+            const replyToId = msg.replyToId ?? null;
+            const showEmojiPicker = emojiPickerForId === msg.id;
 
             return (
               <div
@@ -1045,51 +1222,78 @@ export default function GroupChatPage() {
                   <div
                     className={`flex items-center gap-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
                   >
-                    <div
-                      className={`px-3 py-2 rounded-2xl ${isOwn ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm"}`}
-                    >
-                      {msg.isDeleted ? (
-                        <p className="text-sm italic text-muted-foreground">
-                          [Message deleted]
-                        </p>
-                      ) : isEditing ? (
-                        <div className="flex gap-2 min-w-[180px]">
-                          <input
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            className="flex-1 bg-background/20 border-0 outline-none text-sm text-inherit rounded px-1"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter")
-                                handleEditGroupMessage(msg);
-                              if (e.key === "Escape") {
+                    {/* Message bubble with emoji reaction trigger */}
+                    <div className="relative">
+                      <div
+                        className={`px-3 py-2 rounded-2xl cursor-pointer ${isOwn ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm"}`}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setEmojiPickerForId(msg.id);
+                        }}
+                        onTouchStart={() => startLongPress(msg.id)}
+                        onTouchEnd={cancelLongPress}
+                        onTouchMove={cancelLongPress}
+                      >
+                        {/* Reply quote */}
+                        {replyToId && !msg.isDeleted && (
+                          <ReplyQuoteBlock text={getReplySnippet(replyToId)} />
+                        )}
+
+                        {msg.isDeleted ? (
+                          <p className="text-sm italic text-muted-foreground">
+                            [Message deleted]
+                          </p>
+                        ) : isEditing ? (
+                          <div className="flex gap-2 min-w-[180px]">
+                            <input
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              className="flex-1 bg-background/20 border-0 outline-none text-sm text-inherit rounded px-1"
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter")
+                                  handleEditGroupMessage(msg);
+                                if (e.key === "Escape") {
+                                  setEditingMessageId(null);
+                                  setEditText("");
+                                }
+                              }}
+                              data-ocid="group-msg-edit-input"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleEditGroupMessage(msg)}
+                              className="text-green-400 hover:text-green-300"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
                                 setEditingMessageId(null);
                                 setEditText("");
-                              }
-                            }}
-                            data-ocid="group-msg-edit-input"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleEditGroupMessage(msg)}
-                            className="text-green-400 hover:text-green-300"
-                          >
-                            <Check className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingMessageId(null);
-                              setEditText("");
-                            }}
-                            className="text-muted-foreground/70 hover:text-muted-foreground"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        renderMessageContent(msg.content, msg.timestamp)
+                              }}
+                              className="text-muted-foreground/70 hover:text-muted-foreground"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          renderMessageContent(msg.content, msg.timestamp)
+                        )}
+                      </div>
+
+                      {/* Emoji picker overlay */}
+                      {showEmojiPicker && !msg.isDeleted && (
+                        <EmojiReactionPicker
+                          isOwn={isOwn}
+                          onSelect={(emoji) =>
+                            handleReactToGroupMessage(msg, emoji)
+                          }
+                          onClose={() => setEmojiPickerForId(null)}
+                        />
                       )}
                     </div>
+
                     {!msg.isDeleted && (
                       <div className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <GroupMessageActions
@@ -1105,10 +1309,22 @@ export default function GroupChatPage() {
                           }}
                           onDelete={() => handleDeleteGroupMessage(msg)}
                           onForward={() => setForwardingMessage(msg)}
+                          onReply={() =>
+                            setReplyTo({
+                              id: msg.id,
+                              snippet: getMessageSnippet(msg),
+                            })
+                          }
                         />
                       </div>
                     )}
                   </div>
+
+                  {/* Reactions */}
+                  {reactions.length > 0 && (
+                    <ReactionBadges reactions={reactions} />
+                  )}
+
                   <div
                     className={`flex items-center gap-1.5 px-1 ${isOwn ? "justify-end" : "justify-start"}`}
                   >
@@ -1125,6 +1341,13 @@ export default function GroupChatPage() {
                         (edited)
                       </span>
                     )}
+                    {/* Read receipt */}
+                    {isSeen && (
+                      <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                        <Eye className="h-2.5 w-2.5" />
+                        Seen
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1136,6 +1359,24 @@ export default function GroupChatPage() {
 
       {/* Message Input */}
       <div className="flex-shrink-0 border-t border-border bg-background px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        {/* Reply preview */}
+        {replyTo && (
+          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-rose-50 border border-rose-100 rounded-lg">
+            <CornerUpLeft className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+            <p className="text-xs text-rose-700 flex-1 truncate">
+              Replying to: {replyTo.snippet}
+            </p>
+            <button
+              type="button"
+              onClick={() => setReplyTo(null)}
+              className="text-muted-foreground hover:text-foreground shrink-0"
+              aria-label="Cancel reply"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-2">
           <div className="flex gap-1">
             <button

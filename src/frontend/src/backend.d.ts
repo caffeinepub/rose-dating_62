@@ -65,6 +65,9 @@ export interface GroupMessage {
     groupId: bigint;
     isEdited: boolean;
     timestamp: Time;
+    replyToId?: bigint;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }
 export interface AnalyticsSummary {
     activeUsers: bigint;
@@ -241,7 +244,10 @@ export interface Message {
     sender: Principal;
     isEdited: boolean;
     timestamp: Time;
+    replyToId?: bigint;
     receiver: Principal;
+    reactions: Array<[string, Array<Principal>]>;
+    readBy: Array<Principal>;
 }
 export interface ProfileFilter {
     country?: string;
@@ -422,10 +428,38 @@ export interface backendInterface {
     leaveGroup(groupId: bigint): Promise<void>;
     likePost(postId: string): Promise<void>;
     markAllNotificationsAsRead(): Promise<void>;
+    markGroupMessageRead(groupId: bigint, messageId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    markMessageRead(sender: Principal, messageId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     markNotificationAsRead(notificationId: bigint): Promise<void>;
     markStoryAsViewed(storyId: bigint): Promise<void>;
     pinPostToTrending(postId: string): Promise<void>;
     pinStory(storyId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    reactToGroupMessage(groupId: bigint, messageId: bigint, emoji: string): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    reactToMessage(receiver: Principal, messageId: bigint, emoji: string): Promise<{
         __kind__: "ok";
         ok: null;
     } | {
@@ -438,8 +472,8 @@ export interface backendInterface {
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
     savePost(postId: string): Promise<void>;
     sellRosesToUser(buyer: Principal, amount: number): Promise<void>;
-    sendGroupMessage(groupId: bigint, content: MessageType): Promise<void>;
-    sendMessage(receiver: Principal, content: MessageType): Promise<void>;
+    sendGroupMessage(groupId: bigint, content: MessageType, replyToId: bigint | null): Promise<void>;
+    sendMessage(receiver: Principal, content: MessageType, replyToId: bigint | null): Promise<void>;
     setStripeConfiguration(config: StripeConfiguration): Promise<void>;
     transform(input: TransformationInput): Promise<TransformationOutput>;
     unblockUser(userToUnblock: Principal): Promise<void>;
