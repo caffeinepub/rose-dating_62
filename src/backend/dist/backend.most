@@ -1,0 +1,291 @@
+// Version: 1.0.0
+type BlockRecord__824067733 =
+  {blocked : Principal; blocker : Principal; timestamp : Time__38388344};
+type CommentInteraction__393041 =
+  {
+    comment : Text;
+    id : Nat;
+    parentCommentId : ?Nat;
+    postId : Text;
+    timestamp : Time__38388344;
+    user : Principal
+  };
+type Conversation__183739819 =
+  {
+    id : Nat;
+    messages : [Message__19119041];
+    otherParticipantProfile : ?UserProfile__491224006;
+    participants : [Principal]
+  };
+type Data__791452850<K, V> =
+  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type ExternalBlob__246066408 = Blob;
+type ForwardInteraction__375193206 =
+  {
+    conversationId : Nat;
+    postId : Text;
+    timestamp : Time__38388344;
+    user : Principal
+  };
+type GroupChat__82569430 =
+  {
+    admins : [Principal];
+    avatar : ?ExternalBlob__246066408;
+    createdAt : Time__38388344;
+    creator : Principal;
+    id : Nat;
+    name : Text;
+    participants : [Principal]
+  };
+type GroupMessage__423684362 =
+  {
+    content : MessageType__269899696;
+    groupId : Nat;
+    id : Nat;
+    sender : Principal;
+    senderProfile : ?UserProfile__491224006;
+    timestamp : Time__38388344
+  };
+type Internal__8484328<K, V> =
+  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
+type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
+type LikeInteraction__649860592 =
+  {postId : Text; timestamp : Time__38388344; user : Principal};
+type Map__158565046<K, V> = Map__297112838<K, V>;
+type Map__297112838<K, V> =
+  {var root : Node__46230540<K, V>; var size : Nat__490723111};
+type Map__605269027<K, V> = Map__158565046<K, V>;
+type MessageType__269899696 =
+  {
+    #forwardedPost :
+      {
+        author : Principal;
+        contentSnippet : Text;
+        image : ?ExternalBlob__246066408;
+        postId : Text;
+        timestamp : Time__38388344
+      };
+    #image : ExternalBlob__246066408;
+    #media : ExternalBlob__246066408;
+    #receipt : ReceiptMessage__605898364;
+    #rose : Float;
+    #text : Text;
+    #tradeRequest : TradeRequestMessage__809530092;
+    #video : ExternalBlob__246066408;
+    #voice : ExternalBlob__246066408
+  };
+type Message__19119041 =
+  {
+    content : MessageType__269899696;
+    id : Nat;
+    receiver : Principal;
+    sender : Principal;
+    senderProfile : ?UserProfile__491224006;
+    timestamp : Time__38388344
+  };
+type Nat__490723111 = Nat__920180692;
+type Nat__920180692 = Nat;
+type Node__46230540<K, V> =
+  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+type NotificationType__754463539 =
+  {
+    #comment;
+    #follow;
+    #groupAdd;
+    #groupMessage;
+    #like;
+    #message;
+    #postGift;
+    #roseGift;
+    #roseReceipt;
+    #storyView;
+    #systemNotice;
+    #tradeRequest
+  };
+type Notification__879889657 =
+  {
+    content : Text;
+    id : Nat;
+    isRead : Bool;
+    linkedId : ?Text;
+    linkedType : ?Text;
+    notificationType : NotificationType__754463539;
+    timestamp : Time__38388344;
+    userId : Principal
+  };
+type Post__955439577 =
+  {
+    author : Principal;
+    content : Text;
+    id : Text;
+    image : ?ExternalBlob__246066408;
+    timestamp : Time__38388344
+  };
+type ReceiptMessage__605898364 =
+  {
+    amount : Float;
+    fee : Float;
+    receiver : Principal;
+    sender : Principal;
+    summary : Text;
+    timestamp : Time__38388344
+  };
+type RoseGiftOnPost__931872855 =
+  {
+    amount : Float;
+    gifter : Principal;
+    postId : Text;
+    timestamp : Time__38388344
+  };
+type RoseTransactionType__954121714 =
+  {#buy; #fee; #gift; #mint; #sell; #transfer};
+type RoseTransaction__310589703 =
+  {
+    amount : Float;
+    feeDistributed : Float;
+    id : Nat;
+    receiver : ?Principal;
+    sender : ?Principal;
+    timestamp : Time__38388344;
+    transactionType : RoseTransactionType__954121714
+  };
+type SaveInteraction__964499543 =
+  {postId : Text; timestamp : Time__38388344; user : Principal};
+type Story__270542992 =
+  {
+    author : Principal;
+    content : MessageType__269899696;
+    expiresAt : Time__38388344;
+    id : Nat;
+    timestamp : Time__38388344;
+    viewedBy : [Principal]
+  };
+type StripeConfiguration__96897619 =
+  {allowedCountries : [Text]; secretKey : Text};
+type Time__38388344 = Int;
+type TradeRequestMessage__809530092 =
+  {
+    amount : Float;
+    requestType : Text;
+    requester : Principal;
+    summary : Text;
+    timestamp : Time__38388344
+  };
+type UserProfile__491224006 =
+  {
+    bio : ?Text;
+    birthYear : ?Nat;
+    country : Text;
+    gender : ?Text;
+    name : Text;
+    profilePicture : ?ExternalBlob__246066408;
+    username : Text
+  };
+type UserRole__1054455867 = {#admin; #guest; #user};
+actor {
+  stable accessControlState :
+    {
+      var adminAssigned : Bool;
+      userRoles : Map__605269027<Principal, UserRole__1054455867>
+    };
+  stable adminUsername : Text;
+  stable var blockListMap :
+    {
+      var root : Node__46230540<Principal, [Principal]>;
+      var size : Nat__490723111
+    };
+  stable var blockRecords : [BlockRecord__824067733];
+  stable var commentsMap :
+    {
+      var root : Node__46230540<Text, [CommentInteraction__393041]>;
+      var size : Nat__490723111
+    };
+  stable var conversations :
+    {
+      var root : Node__46230540<Nat, Conversation__183739819>;
+      var size : Nat__490723111
+    };
+  stable exchangeRateUpdateInterval : Int;
+  stable var followersMap :
+    {
+      var root : Node__46230540<Principal, [Principal]>;
+      var size : Nat__490723111
+    };
+  stable var followingMap :
+    {
+      var root : Node__46230540<Principal, [Principal]>;
+      var size : Nat__490723111
+    };
+  stable var forwardsMap :
+    {
+      var root : Node__46230540<Text, [ForwardInteraction__375193206]>;
+      var size : Nat__490723111
+    };
+  stable var groupChats :
+    {
+      var root : Node__46230540<Nat, GroupChat__82569430>;
+      var size : Nat__490723111
+    };
+  stable var groupMessages :
+    {
+      var root : Node__46230540<Nat, [GroupMessage__423684362]>;
+      var size : Nat__490723111
+    };
+  stable var icpUsdExchangeRate : ?Float;
+  stable var lastExchangeRateUpdate : ?Time__38388344;
+  stable var likesMap :
+    {
+      var root : Node__46230540<Text, [LikeInteraction__649860592]>;
+      var size : Nat__490723111
+    };
+  stable var nextCommentId : Nat;
+  stable var nextConversationId : Nat;
+  stable var nextGroupId : Nat;
+  stable var nextGroupMessageId : Nat;
+  stable var nextMessageId : Nat;
+  stable var nextNotificationId : Nat;
+  stable var nextRoseTransactionId : Nat;
+  stable var nextStoryId : Nat;
+  stable var notificationsMap :
+    {
+      var root : Node__46230540<Principal, [Notification__879889657]>;
+      var size : Nat__490723111
+    };
+  stable var pinnedTrendingPostId : ?Text;
+  stable var postRoseGiftsMap :
+    {
+      var root : Node__46230540<Text, [RoseGiftOnPost__931872855]>;
+      var size : Nat__490723111
+    };
+  stable var posts :
+    {
+      var root : Node__46230540<Text, Post__955439577>;
+      var size : Nat__490723111
+    };
+  stable var roseBalances :
+    {var root : Node__46230540<Principal, Float>; var size : Nat__490723111};
+  stable var roseTransactions : [RoseTransaction__310589703];
+  stable var savesMap :
+    {
+      var root : Node__46230540<Text, [SaveInteraction__964499543]>;
+      var size : Nat__490723111
+    };
+  stable var stories :
+    {
+      var root : Node__46230540<Nat, Story__270542992>;
+      var size : Nat__490723111
+    };
+  stable storyDuration : Int;
+  stable var stripeConfig : ?StripeConfiguration__96897619;
+  stable var totalCirculatingRoses : Float;
+  stable totalRoseSupply : Float;
+  stable var userGroups :
+    {var root : Node__46230540<Principal, [Nat]>; var size : Nat__490723111};
+  stable var userProfiles :
+    {
+      var root : Node__46230540<Principal, UserProfile__491224006>;
+      var size : Nat__490723111
+    };
+  stable var userStories :
+    {var root : Node__46230540<Principal, [Nat]>; var size : Nat__490723111}
+};

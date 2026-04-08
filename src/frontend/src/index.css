@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 1rem;
+    --background: 0.98 0.02 350;
+    --foreground: 0.2 0.02 350;
+    --card: 1 0.01 350;
+    --card-foreground: 0.2 0.02 350;
+    --popover: 1 0.01 350;
+    --popover-foreground: 0.2 0.02 350;
+    --primary: 0.65 0.22 350;
+    --primary-foreground: 1 0 0;
+    --secondary: 0.95 0.04 350;
+    --secondary-foreground: 0.25 0.02 350;
+    --muted: 0.96 0.03 350;
+    --muted-foreground: 0.55 0.04 350;
+    --accent: 0.92 0.06 350;
+    --accent-foreground: 0.25 0.02 350;
+    --destructive: 0.58 0.24 27;
+    --destructive-foreground: 0.99 0 0;
+    --border: 0.9 0.04 350;
+    --input: 0.92 0.04 350;
+    --ring: 0.65 0.22 350;
+    --chart-1: 0.7 0.24 350;
+    --chart-2: 0.65 0.18 340;
+    --chart-3: 0.75 0.2 10;
+    --chart-4: 0.6 0.22 330;
+    --chart-5: 0.8 0.24 355;
+    --sidebar: 0.98 0.02 350;
+    --sidebar-foreground: 0.2 0.02 350;
+    --sidebar-primary: 0.65 0.22 350;
+    --sidebar-primary-foreground: 1 0 0;
+    --sidebar-accent: 0.95 0.04 350;
+    --sidebar-accent-foreground: 0.25 0.02 350;
+    --sidebar-border: 0.9 0.04 350;
+    --sidebar-ring: 0.65 0.22 350;
+  }
+
+  .dark {
+    --background: 0.15 0.04 350;
+    --foreground: 0.98 0.02 350;
+    --card: 0.2 0.05 350;
+    --card-foreground: 0.98 0.02 350;
+    --popover: 0.22 0.05 350;
+    --popover-foreground: 0.98 0.02 350;
+    --primary: 0.7 0.24 350;
+    --primary-foreground: 0.15 0.04 350;
+    --secondary: 0.28 0.06 350;
+    --secondary-foreground: 0.98 0.02 350;
+    --muted: 0.28 0.05 350;
+    --muted-foreground: 0.7 0.06 350;
+    --accent: 0.35 0.08 350;
+    --accent-foreground: 0.98 0.02 350;
+    --destructive: 0.65 0.22 27;
+    --destructive-foreground: 0.15 0.04 350;
+    --border: 0.3 0.06 350;
+    --input: 0.28 0.06 350;
+    --ring: 0.7 0.24 350;
+    --chart-1: 0.65 0.26 350;
+    --chart-2: 0.7 0.22 340;
+    --chart-3: 0.8 0.2 10;
+    --chart-4: 0.65 0.24 330;
+    --chart-5: 0.75 0.26 355;
+    --sidebar: 0.2 0.05 350;
+    --sidebar-foreground: 0.98 0.02 350;
+    --sidebar-primary: 0.7 0.24 350;
+    --sidebar-primary-foreground: 0.98 0.02 350;
+    --sidebar-accent: 0.28 0.06 350;
+    --sidebar-accent-foreground: 0.98 0.02 350;
+    --sidebar-border: 0.3 0.06 350;
+    --sidebar-ring: 0.7 0.24 350;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background: linear-gradient(
+      135deg,
+      oklch(var(--background)) 0%,
+      oklch(0.96 0.03 350) 100%
+    );
+    background-attachment: fixed;
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+      "Roboto", "Oxygen", "Ubuntu", "Cantarell", sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: "Poppins", "Inter", sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .rose-gradient {
+    background: linear-gradient(
+      135deg,
+      oklch(0.75 0.2 350) 0%,
+      oklch(0.65 0.24 340) 100%
+    );
+  }
+
+  .rose-gradient-soft {
+    background: linear-gradient(
+      135deg,
+      oklch(0.95 0.04 350) 0%,
+      oklch(0.92 0.06 345) 100%
+    );
+  }
+
+  .rose-glow {
+    box-shadow: 0 0 20px oklch(0.65 0.22 350 / 0.3), 0 0 40px
+      oklch(0.65 0.22 350 / 0.15);
+  }
+
+  .rose-glow-sm {
+    box-shadow: 0 0 10px oklch(0.65 0.22 350 / 0.2), 0 0 20px
+      oklch(0.65 0.22 350 / 0.1);
+  }
+
+  .avatar-glow {
+    box-shadow: 0 0 0 3px oklch(var(--background)), 0 0 0 5px
+      oklch(0.65 0.22 350 / 0.3), 0 4px 12px oklch(0.65 0.22 350 / 0.2);
+  }
+
+  .card-romantic {
+    background: linear-gradient(
+      135deg,
+      oklch(var(--card)) 0%,
+      oklch(0.98 0.02 350) 100%
+    );
+    box-shadow: 0 4px 20px oklch(0.65 0.22 350 / 0.08), 0 2px 8px
+      oklch(0.65 0.22 350 / 0.04);
+    border: 1px solid oklch(0.9 0.04 350 / 0.5);
+  }
+
+  .fade-in {
+    animation: fadeIn 0.3s ease-in;
+  }
+
+  .slide-up {
+    animation: slideUp 0.4s ease-out;
+  }
+
+  .slide-down {
+    animation: slideDown 0.4s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

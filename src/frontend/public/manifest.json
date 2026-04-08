@@ -1,0 +1,67 @@
+{
+  "name": "Rose Dating",
+  "short_name": "Rose Dating",
+  "description": "A romantic dating platform with on-chain Rose currency system",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fdf5f8",
+  "theme_color": "#f5a3c7",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/generated/rose-dating-pwa-icon-transparent.dim_192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/generated/rose-dating-pwa-icon-large-transparent.dim_512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["social", "lifestyle"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Posts",
+      "short_name": "Posts",
+      "description": "View social feed and posts",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/assets/generated/posts-icon.dim_24x24.png",
+          "sizes": "24x24",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Chats",
+      "short_name": "Chats",
+      "description": "View conversations and messages",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/assets/generated/chat-icon.dim_24x24.png",
+          "sizes": "24x24",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "short_name": "Users",
+      "description": "Discover other users",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/assets/generated/users-icon.dim_24x24.png",
+          "sizes": "24x24",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}
