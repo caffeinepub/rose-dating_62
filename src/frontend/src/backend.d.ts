@@ -58,10 +58,12 @@ export interface TransformationOutput {
 export type Time = bigint;
 export interface GroupMessage {
     id: bigint;
+    isDeleted: boolean;
     content: MessageType;
     senderProfile?: UserProfile;
     sender: Principal;
     groupId: bigint;
+    isEdited: boolean;
     timestamp: Time;
 }
 export interface AnalyticsSummary {
@@ -233,9 +235,11 @@ export interface Notification {
 }
 export interface Message {
     id: bigint;
+    isDeleted: boolean;
     content: MessageType;
     senderProfile?: UserProfile;
     sender: Principal;
+    isEdited: boolean;
     timestamp: Time;
     receiver: Principal;
 }
@@ -305,13 +309,60 @@ export interface backendInterface {
     createStory(content: MessageType): Promise<bigint>;
     deleteCallerProfile(): Promise<void>;
     deleteComment(postId: string, commentId: bigint): Promise<void>;
-    deleteMessage(conversationId: bigint, messageId: bigint): Promise<void>;
+    deleteGroupMessage(groupId: bigint, messageId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    deleteMessage(conversationId: bigint, messageId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     deleteNotification(notificationId: bigint): Promise<void>;
     deletePost(postId: string): Promise<void>;
-    editMessage(conversationId: bigint, messageId: bigint, newContent: MessageType): Promise<void>;
+    editGroupMessage(groupId: bigint, messageId: bigint, newText: string): Promise<{
+        __kind__: "ok";
+        ok: GroupMessage;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    editMessage(conversationId: bigint, messageId: bigint, newText: string): Promise<{
+        __kind__: "ok";
+        ok: Message;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     editPost(postId: string, content: string, image: ExternalBlob | null): Promise<void>;
     filterProfiles(filter: ProfileFilter): Promise<Array<ProfileWithPrincipal>>;
     followUser(targetUser: Principal): Promise<void>;
+    forwardGroupMessageToConversation(sourceGroupId: bigint, messageId: bigint, targetConversationId: bigint): Promise<{
+        __kind__: "ok";
+        ok: Message;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    forwardMessage(sourceConversationId: bigint, messageId: bigint, targetConversationId: bigint): Promise<{
+        __kind__: "ok";
+        ok: Message;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    forwardMessageToGroup(sourceConversationId: bigint, messageId: bigint, targetGroupId: bigint): Promise<{
+        __kind__: "ok";
+        ok: GroupMessage;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     forwardPostToConversation(postId: string, conversationId: bigint): Promise<void>;
     getActiveStories(): Promise<Array<Story>>;
     getAllBlockRecords(): Promise<Array<BlockRecord>>;
@@ -331,6 +382,7 @@ export interface backendInterface {
     getIcpUsdExchangeRate(): Promise<number>;
     getNotificationCountByType(): Promise<NotificationCount>;
     getNotifications(): Promise<Array<Notification>>;
+    getPinnedStories(userId: Principal): Promise<Array<Story>>;
     getPinnedTrendingPost(): Promise<Post | null>;
     getPostComments(postId: string): Promise<Array<CommentInteraction>>;
     getPostInteractions(postId: string): Promise<{
@@ -373,6 +425,13 @@ export interface backendInterface {
     markNotificationAsRead(notificationId: bigint): Promise<void>;
     markStoryAsViewed(storyId: bigint): Promise<void>;
     pinPostToTrending(postId: string): Promise<void>;
+    pinStory(storyId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     removeGroupParticipant(groupId: bigint, participant: Principal): Promise<void>;
     requestBuyRoses(amount: number): Promise<string>;
     requestSellRoses(amount: number): Promise<string>;
@@ -387,6 +446,13 @@ export interface backendInterface {
     unfollowUser(targetUser: Principal): Promise<void>;
     universalSearch(searchTerm: string, maxResults: bigint | null): Promise<Array<SearchResult>>;
     unlikePost(postId: string): Promise<void>;
+    unpinStory(storyId: bigint): Promise<{
+        __kind__: "ok";
+        ok: null;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     unpinTrendingPost(): Promise<void>;
     unsavePost(postId: string): Promise<void>;
     updateGroupAvatar(groupId: bigint, newAvatar: ExternalBlob | null): Promise<void>;

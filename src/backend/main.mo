@@ -14,9 +14,12 @@ import Float "mo:base/Float";
 import Int "mo:core/Int";
 import Debug "mo:base/Debug";
 import Buffer "mo:base/Buffer";
+import Runtime "mo:core/Runtime";
+import Migration "migration";
 
 
 
+(with migration = Migration.run)
 actor {
   // Authorization
   let accessControlState = AccessControl.initState();
@@ -442,6 +445,8 @@ actor {
   var nextStoryId = 0;
   var stories = Map.empty<Nat, Story>();
   var userStories = Map.empty<Principal, [Nat]>();
+  // Pinned/highlighted stories per user: storyId stays permanently until unpinned
+  var pinnedStories = Map.empty<Principal, [Nat]>();
 
   let storyDuration : Int = 72 * 60 * 60 * 1_000_000_000; // 72 hours in nanoseconds
 
@@ -523,12 +528,20 @@ actor {
     let now = Time.now();
     let buffer = Buffer.Buffer<Story>(0);
 
+    // Collect pinned story IDs for this user
+    let userPinnedIds = switch (pinnedStories.get(userId)) {
+      case (?ids) { ids };
+      case null { [] };
+    };
+
     switch (userStories.get(userId)) {
       case (?storyIds) {
         for (storyId in storyIds.vals()) {
           switch (stories.get(storyId)) {
             case (?story) {
-              if (story.expiresAt > now) {
+              let isPinned = userPinnedIds.find(func(id : Nat) : Bool { id == storyId }) != null;
+              // Show story if not expired, OR if it is pinned (permanently visible)
+              if (story.expiresAt > now or isPinned) {
                 buffer.add(story);
               };
             };
@@ -554,8 +567,12 @@ actor {
           Debug.trap("Cannot view story: blocking relationship exists");
         };
 
-        // Check if story is expired
-        if (story.expiresAt <= Time.now()) {
+        // Check if story is expired — pinned stories are permanently visible
+        let isAuthorPinned = switch (pinnedStories.get(story.author)) {
+          case (?ids) { ids.find(func(id : Nat) : Bool { id == storyId }) != null };
+          case null { false };
+        };
+        if (story.expiresAt <= Time.now() and not isAuthorPinned) {
           Debug.trap("Story has expired");
         };
 
@@ -601,9 +618,19 @@ actor {
     let now = Time.now();
     var cleanedCount = 0;
 
+    // Collect all pinned story IDs across all users
+    let pinnedSet = Map.empty<Nat, Bool>();
+    for ((_userId, storyIds) in pinnedStories.entries()) {
+      for (storyId in storyIds.vals()) {
+        pinnedSet.add(storyId, true);
+      };
+    };
+
     let storyBuffer = Buffer.Buffer<(Nat, Story)>(0);
     for ((storyId, story) in stories.entries()) {
-      if (story.expiresAt <= now) {
+      // Keep story if not expired OR if it is pinned by its author
+      let isPinned = pinnedSet.containsKey(storyId);
+      if (story.expiresAt <= now and not isPinned) {
         cleanedCount += 1;
       } else {
         storyBuffer.add((storyId, story));
@@ -631,6 +658,82 @@ actor {
     cleanedCount;
   };
 
+  // Story Highlights — pin a story permanently to the author's profile
+  public shared ({ caller }) func pinStory(storyId : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can pin stories");
+    };
+
+    switch (stories.get(storyId)) {
+      case null { return #err("Story not found") };
+      case (?story) {
+        if (story.author != caller) {
+          return #err("Unauthorized: You can only pin your own stories");
+        };
+
+        // Check if already pinned
+        switch (pinnedStories.get(caller)) {
+          case (?ids) {
+            if (ids.find(func(id : Nat) : Bool { id == storyId }) != null) {
+              return #err("Story is already pinned");
+            };
+            pinnedStories.add(caller, ids.concat([storyId]));
+          };
+          case null {
+            pinnedStories.add(caller, [storyId]);
+          };
+        };
+
+        #ok;
+      };
+    };
+  };
+
+  public shared ({ caller }) func unpinStory(storyId : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can unpin stories");
+    };
+
+    switch (pinnedStories.get(caller)) {
+      case null { return #err("No pinned stories found") };
+      case (?ids) {
+        let found = ids.find(func(id : Nat) : Bool { id == storyId });
+        switch (found) {
+          case null { return #err("Story is not pinned") };
+          case (?_) {
+            pinnedStories.add(caller, ids.filter(func(id : Nat) : Bool { id != storyId }));
+            #ok;
+          };
+        };
+      };
+    };
+  };
+
+  public query ({ caller }) func getPinnedStories(userId : Principal) : async [Story] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Debug.trap("Unauthorized: Only authenticated users can view pinned stories");
+    };
+
+    // Check blocking relationship
+    if (hasBlockingRelationship(caller, userId)) {
+      Debug.trap("Cannot view pinned stories: blocking relationship exists");
+    };
+
+    switch (pinnedStories.get(userId)) {
+      case null { [] };
+      case (?ids) {
+        let buffer = Buffer.Buffer<Story>(0);
+        for (storyId in ids.vals()) {
+          switch (stories.get(storyId)) {
+            case (?story) { buffer.add(story) };
+            case null {}; // story was deleted — skip silently
+          };
+        };
+        Buffer.toArray(buffer);
+      };
+    };
+  };
+
   // Group Chat System
   public type GroupChat = {
     id : Nat;
@@ -649,6 +752,8 @@ actor {
     content : MessageType;
     timestamp : Time.Time;
     senderProfile : ?UserProfile;
+    isEdited : Bool;
+    isDeleted : Bool;
   };
 
   var nextGroupId = 0;
@@ -990,6 +1095,8 @@ actor {
           content;
           timestamp = Time.now();
           senderProfile;
+          isEdited = false;
+          isDeleted = false;
         };
 
         switch (groupMessages.get(groupId)) {
@@ -1119,6 +1226,8 @@ actor {
     content : MessageType;
     timestamp : Time.Time;
     senderProfile : ?UserProfile;
+    isEdited : Bool;
+    isDeleted : Bool;
   };
 
   public type Conversation = {
@@ -1213,6 +1322,8 @@ actor {
           content = #forwardedPost(postDetails);
           timestamp = Time.now();
           senderProfile;
+          isEdited = false;
+          isDeleted = false;
         };
 
         func findConversation() : ?(Nat, Conversation) {
@@ -1276,6 +1387,8 @@ actor {
       content;
       timestamp = Time.now();
       senderProfile;
+      isEdited = false;
+      isDeleted = false;
     };
 
     func findConversation() : ?(Nat, Conversation) {
@@ -1375,86 +1488,372 @@ actor {
     };
   };
 
-  public shared ({ caller }) func editMessage(conversationId : Nat, messageId : Nat, newContent : MessageType) : async () {
+  public shared ({ caller }) func editMessage(conversationId : Nat, messageId : Nat, newText : Text) : async { #ok : Message; #err : Text } {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Debug.trap("Unauthorized: Only users can edit messages");
+      return #err("Unauthorized: Only users can edit messages");
     };
 
     switch (conversations.get(conversationId)) {
       case (?conv) {
-        // Verify caller is participant
         if (conv.participants.find(func(p : Principal) : Bool { p == caller }) == null) {
-          Debug.trap("Unauthorized: Only conversation participants can edit messages");
+          return #err("Unauthorized: Only conversation participants can edit messages");
         };
 
+        var updatedMsg : ?Message = null;
         let updatedMessages = conv.messages.map(func(msg : Message) : Message {
           if (msg.id == messageId) {
             if (msg.sender != caller) {
-              Debug.trap("Unauthorized: Only message sender can edit this message");
+              Runtime.trap("Unauthorized: Only message sender can edit this message");
             };
-            // Cannot edit system messages
+            if (msg.isDeleted) {
+              Runtime.trap("Cannot edit a deleted message");
+            };
             switch (msg.content) {
-              case (#receipt(_)) {
-                Debug.trap("Cannot edit receipt messages");
+              case (#text(_)) {};
+              case (_) {
+                Runtime.trap("Only text messages can be edited");
               };
-              case (#tradeRequest(_)) {
-                Debug.trap("Cannot edit trade request messages");
-              };
-              case (_) {};
             };
-            { msg with content = newContent }
+            let edited = { msg with content = #text(newText); isEdited = true };
+            updatedMsg := ?edited;
+            edited
           } else {
             msg
           }
         });
 
-        let updatedConv = {
-          conv with
-          messages = updatedMessages;
+        switch (updatedMsg) {
+          case null { return #err("Message not found") };
+          case (?editedMsg) {
+            let updatedConv = { conv with messages = updatedMessages };
+            conversations.add(conversationId, updatedConv);
+            #ok(editedMsg)
+          };
         };
-        conversations.add(conversationId, updatedConv);
       };
-      case null {
-        Debug.trap("Conversation not found");
-      };
+      case null { #err("Conversation not found") };
     };
   };
 
-  public shared ({ caller }) func deleteMessage(conversationId : Nat, messageId : Nat) : async () {
+  public shared ({ caller }) func deleteMessage(conversationId : Nat, messageId : Nat) : async { #ok; #err : Text } {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
-      Debug.trap("Unauthorized: Only users can delete messages");
+      return #err("Unauthorized: Only users can delete messages");
     };
 
     switch (conversations.get(conversationId)) {
       case (?conv) {
-        // Verify caller is participant
         if (conv.participants.find(func(p : Principal) : Bool { p == caller }) == null) {
-          Debug.trap("Unauthorized: Only conversation participants can delete messages");
+          return #err("Unauthorized: Only conversation participants can delete messages");
         };
 
-        // Find message and verify ownership
         let messageToDelete = conv.messages.find(func(msg : Message) : Bool { msg.id == messageId });
         switch (messageToDelete) {
+          case null { return #err("Message not found") };
           case (?msg) {
             if (msg.sender != caller and not AccessControl.isAdmin(accessControlState, caller)) {
-              Debug.trap("Unauthorized: Only message sender or admin can delete this message");
+              return #err("Unauthorized: Only message sender or admin can delete this message");
             };
           };
-          case null {
-            Debug.trap("Message not found");
+        };
+
+        let updatedMessages = conv.messages.map(func(msg : Message) : Message {
+          if (msg.id == messageId) {
+            { msg with content = #text("[Message deleted]"); isDeleted = true }
+          } else {
+            msg
+          }
+        });
+
+        let updatedConv = { conv with messages = updatedMessages };
+        conversations.add(conversationId, updatedConv);
+        #ok;
+      };
+      case null { #err("Conversation not found") };
+    };
+  };
+
+  public shared ({ caller }) func forwardMessage(sourceConversationId : Nat, messageId : Nat, targetConversationId : Nat) : async { #ok : Message; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can forward messages");
+    };
+
+    // Find source message
+    let sourceMsg = switch (conversations.get(sourceConversationId)) {
+      case null { return #err("Source conversation not found") };
+      case (?conv) {
+        if (conv.participants.find(func(p : Principal) : Bool { p == caller }) == null) {
+          return #err("Unauthorized: You are not a participant of the source conversation");
+        };
+        switch (conv.messages.find(func(msg : Message) : Bool { msg.id == messageId })) {
+          case null { return #err("Message not found") };
+          case (?msg) {
+            if (msg.isDeleted) { return #err("Cannot forward a deleted message") };
+            msg
+          };
+        };
+      };
+    };
+
+    // Find target conversation and get the receiver
+    switch (conversations.get(targetConversationId)) {
+      case null { return #err("Target conversation not found") };
+      case (?targetConv) {
+        if (targetConv.participants.find(func(p : Principal) : Bool { p == caller }) == null) {
+          return #err("Unauthorized: You are not a participant of the target conversation");
+        };
+
+        let receiver = switch (targetConv.participants.find(func(p : Principal) : Bool { p != caller })) {
+          case null { return #err("Could not determine receiver") };
+          case (?r) r;
+        };
+
+        let newMsgId = nextMessageId;
+        nextMessageId += 1;
+
+        let senderProfile = userProfiles.get(caller);
+        let forwarded : Message = {
+          id = newMsgId;
+          sender = caller;
+          receiver;
+          content = sourceMsg.content;
+          timestamp = Time.now();
+          senderProfile;
+          isEdited = false;
+          isDeleted = false;
+        };
+
+        let updatedMessages = targetConv.messages.concat([forwarded]);
+        let updatedConv = { targetConv with messages = updatedMessages };
+        conversations.add(targetConversationId, updatedConv);
+
+        let contentPreview = switch (sourceMsg.content) {
+          case (#text(t)) t;
+          case (#image(_)) "Image";
+          case (#video(_)) "Video";
+          case (#voice(_)) "Voice message";
+          case (#media(_)) "Media";
+          case (_) "Forwarded message";
+        };
+        createMessageNotification(caller, receiver, contentPreview, targetConversationId);
+        #ok(forwarded)
+      };
+    };
+  };
+
+  public shared ({ caller }) func editGroupMessage(groupId : Nat, messageId : Nat, newText : Text) : async { #ok : GroupMessage; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can edit group messages");
+    };
+
+    if (not isGroupParticipant(groupId, caller)) {
+      return #err("Unauthorized: Only group participants can edit messages");
+    };
+
+    switch (groupMessages.get(groupId)) {
+      case null { return #err("Group not found or no messages") };
+      case (?messages) {
+        var updatedMsg : ?GroupMessage = null;
+        let updatedMessages = messages.map(func(msg : GroupMessage) : GroupMessage {
+          if (msg.id == messageId) {
+            if (msg.sender != caller) {
+              Runtime.trap("Unauthorized: Only message sender can edit this message");
+            };
+            if (msg.isDeleted) {
+              Runtime.trap("Cannot edit a deleted message");
+            };
+            switch (msg.content) {
+              case (#text(_)) {};
+              case (_) {
+                Runtime.trap("Only text messages can be edited");
+              };
+            };
+            let edited = { msg with content = #text(newText); isEdited = true };
+            updatedMsg := ?edited;
+            edited
+          } else {
+            msg
+          }
+        });
+
+        switch (updatedMsg) {
+          case null { return #err("Message not found") };
+          case (?editedMsg) {
+            groupMessages.add(groupId, updatedMessages);
+            #ok(editedMsg)
+          };
+        };
+      };
+    };
+  };
+
+  public shared ({ caller }) func deleteGroupMessage(groupId : Nat, messageId : Nat) : async { #ok; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can delete group messages");
+    };
+
+    if (not isGroupParticipant(groupId, caller)) {
+      return #err("Unauthorized: Only group participants can delete messages");
+    };
+
+    switch (groupMessages.get(groupId)) {
+      case null { return #err("Group not found or no messages") };
+      case (?messages) {
+        let msgToDelete = messages.find(func(msg : GroupMessage) : Bool { msg.id == messageId });
+        switch (msgToDelete) {
+          case null { return #err("Message not found") };
+          case (?msg) {
+            if (msg.sender != caller and not isGroupAdmin(groupId, caller)) {
+              return #err("Unauthorized: Only message sender or group admin can delete this message");
+            };
           };
         };
 
-        let updatedMessages = conv.messages.filter(func(msg : Message) : Bool { msg.id != messageId });
+        let updatedMessages = messages.map(func(msg : GroupMessage) : GroupMessage {
+          if (msg.id == messageId) {
+            { msg with content = #text("[Message deleted]"); isDeleted = true }
+          } else {
+            msg
+          }
+        });
 
-        let updatedConv = {
-          conv with
-          messages = updatedMessages;
-        };
-        conversations.add(conversationId, updatedConv);
+        groupMessages.add(groupId, updatedMessages);
+        #ok;
       };
-      case null {
-        Debug.trap("Conversation not found");
+    };
+  };
+
+  public shared ({ caller }) func forwardMessageToGroup(sourceConversationId : Nat, messageId : Nat, targetGroupId : Nat) : async { #ok : GroupMessage; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can forward messages");
+    };
+
+    // Find source message
+    let sourceMsg = switch (conversations.get(sourceConversationId)) {
+      case null { return #err("Source conversation not found") };
+      case (?conv) {
+        if (conv.participants.find(func(p : Principal) : Bool { p == caller }) == null) {
+          return #err("Unauthorized: You are not a participant of the source conversation");
+        };
+        switch (conv.messages.find(func(msg : Message) : Bool { msg.id == messageId })) {
+          case null { return #err("Message not found") };
+          case (?msg) {
+            if (msg.isDeleted) { return #err("Cannot forward a deleted message") };
+            msg
+          };
+        };
+      };
+    };
+
+    if (not isGroupParticipant(targetGroupId, caller)) {
+      return #err("Unauthorized: You are not a participant of the target group");
+    };
+
+    let targetGroup = switch (groupChats.get(targetGroupId)) {
+      case null { return #err("Target group not found") };
+      case (?g) g;
+    };
+
+    let newMsgId = nextGroupMessageId;
+    nextGroupMessageId += 1;
+
+    let senderProfile = userProfiles.get(caller);
+    let forwarded : GroupMessage = {
+      id = newMsgId;
+      groupId = targetGroupId;
+      sender = caller;
+      content = sourceMsg.content;
+      timestamp = Time.now();
+      senderProfile;
+      isEdited = false;
+      isDeleted = false;
+    };
+
+    switch (groupMessages.get(targetGroupId)) {
+      case (?msgs) { groupMessages.add(targetGroupId, msgs.concat([forwarded])) };
+      case null { groupMessages.add(targetGroupId, [forwarded]) };
+    };
+
+    let contentPreview = switch (sourceMsg.content) {
+      case (#text(t)) t;
+      case (#image(_)) "Image";
+      case (#video(_)) "Video";
+      case (#voice(_)) "Voice message";
+      case (#media(_)) "Media";
+      case (_) "Forwarded message";
+    };
+    for (participant in targetGroup.participants.vals()) {
+      if (participant != caller) {
+        createGroupMessageNotification(caller, participant, targetGroupId, targetGroup.name, contentPreview);
+      };
+    };
+    #ok(forwarded)
+  };
+
+  public shared ({ caller }) func forwardGroupMessageToConversation(sourceGroupId : Nat, messageId : Nat, targetConversationId : Nat) : async { #ok : Message; #err : Text } {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      return #err("Unauthorized: Only users can forward messages");
+    };
+
+    if (not isGroupParticipant(sourceGroupId, caller)) {
+      return #err("Unauthorized: You are not a participant of the source group");
+    };
+
+    // Find source message
+    let sourceMsg = switch (groupMessages.get(sourceGroupId)) {
+      case null { return #err("Source group has no messages") };
+      case (?msgs) {
+        switch (msgs.find(func(msg : GroupMessage) : Bool { msg.id == messageId })) {
+          case null { return #err("Message not found") };
+          case (?msg) {
+            if (msg.isDeleted) { return #err("Cannot forward a deleted message") };
+            msg
+          };
+        };
+      };
+    };
+
+    // Find target conversation
+    switch (conversations.get(targetConversationId)) {
+      case null { return #err("Target conversation not found") };
+      case (?targetConv) {
+        if (targetConv.participants.find(func(p : Principal) : Bool { p == caller }) == null) {
+          return #err("Unauthorized: You are not a participant of the target conversation");
+        };
+
+        let receiver = switch (targetConv.participants.find(func(p : Principal) : Bool { p != caller })) {
+          case null { return #err("Could not determine receiver") };
+          case (?r) r;
+        };
+
+        let newMsgId = nextMessageId;
+        nextMessageId += 1;
+
+        let senderProfile = userProfiles.get(caller);
+        let forwarded : Message = {
+          id = newMsgId;
+          sender = caller;
+          receiver;
+          content = sourceMsg.content;
+          timestamp = Time.now();
+          senderProfile;
+          isEdited = false;
+          isDeleted = false;
+        };
+
+        let updatedMessages = targetConv.messages.concat([forwarded]);
+        let updatedConv = { targetConv with messages = updatedMessages };
+        conversations.add(targetConversationId, updatedConv);
+
+        let contentPreview = switch (sourceMsg.content) {
+          case (#text(t)) t;
+          case (#image(_)) "Image";
+          case (#video(_)) "Video";
+          case (#voice(_)) "Voice message";
+          case (#media(_)) "Media";
+          case (_) "Forwarded message";
+        };
+        createMessageNotification(caller, receiver, contentPreview, targetConversationId);
+        #ok(forwarded)
       };
     };
   };
@@ -1472,6 +1871,8 @@ actor {
       content = #receipt(receipt);
       timestamp = Time.now();
       senderProfile;
+      isEdited = false;
+      isDeleted = false;
     };
 
     func findConversation() : ?(Nat, Conversation) {
@@ -1530,6 +1931,8 @@ actor {
       content = #tradeRequest(tradeRequest);
       timestamp = Time.now();
       senderProfile;
+      isEdited = false;
+      isDeleted = false;
     };
 
     func findConversation() : ?(Nat, Conversation) {

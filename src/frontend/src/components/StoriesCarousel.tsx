@@ -5,7 +5,14 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Principal } from "@icp-sdk/core/principal";
 import { useNavigate } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, Share2, X } from "lucide-react";
+import {
+  Bookmark,
+  BookmarkCheck,
+  ChevronLeft,
+  ChevronRight,
+  Share2,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { Story } from "../backend";
@@ -15,11 +22,15 @@ import {
   useGetActiveStories,
   useGetConversations,
   useGetGroupChats,
+  useGetPinnedStories,
   useGetUserProfile,
   useMarkStoryAsViewed,
+  usePinStory,
   useSendGroupMessage,
   useSendMessage,
+  useUnpinStory,
 } from "../hooks/useQueries";
+import { getMimeType } from "../lib/mimeTypes";
 
 export default function StoriesCarousel() {
   const { identity } = useInternetIdentity();
@@ -27,8 +38,15 @@ export default function StoriesCarousel() {
   const markAsViewed = useMarkStoryAsViewed();
   const navigate = useNavigate();
 
+  const callerPrincipal = identity?.getPrincipal().toString() ?? "";
+
   const [selectedStory, setSelectedStory] = useState<Story | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  // Fetch pinned stories for the current user so we know which are pinned
+  const { data: ownPinnedStories } = useGetPinnedStories(
+    callerPrincipal || null,
+  );
 
   // Group stories by author
   const storiesByAuthor =
@@ -245,7 +263,14 @@ export default function StoriesCarousel() {
               </div>
 
               {/* Story Interactions - Forward only (no gift) */}
-              <StoryInteractions story={selectedStory} />
+              <StoryInteractions
+                story={selectedStory}
+                isOwnStory={selectedStory.author.toString() === callerPrincipal}
+                isPinned={
+                  ownPinnedStories?.some((s) => s.id === selectedStory.id) ??
+                  false
+                }
+              />
             </div>
           )}
         </DialogContent>
@@ -266,21 +291,10 @@ function EnhancedVideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
-    const getMimeType = (url: string): string => {
-      const ext = url.split(".").pop()?.toLowerCase();
-      switch (ext) {
-        case "mp4":
-          return "video/mp4";
-        case "webm":
-          return "video/webm";
-        case "mov":
-          return "video/quicktime";
-        case "avi":
-          return "video/x-msvideo";
-        default:
-          return "video/mp4";
-      }
-    };
+    // Clear stale <source> children before appending to prevent memory leaks on re-render
+    while (video.firstChild) {
+      video.removeChild(video.firstChild);
+    }
 
     const source = document.createElement("source");
     source.src = src;
@@ -439,8 +453,38 @@ function StoryHeader({
   );
 }
 
-function StoryInteractions({ story }: { story: Story }) {
+function StoryInteractions({
+  story,
+  isOwnStory,
+  isPinned,
+}: {
+  story: Story;
+  isOwnStory: boolean;
+  isPinned: boolean;
+}) {
   const [showForward, setShowForward] = useState(false);
+  const [pinPending, setPinPending] = useState(false);
+  const pinStory = usePinStory();
+  const unpinStory = useUnpinStory();
+
+  const handlePinToggle = async () => {
+    if (pinPending) return;
+    setPinPending(true);
+    try {
+      if (isPinned) {
+        await unpinStory.mutateAsync(story.id);
+        toast.success("Story removed from Highlights");
+      } else {
+        await pinStory.mutateAsync(story.id);
+        toast.success("Story pinned to your Highlights");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to update pin";
+      toast.error(msg);
+    } finally {
+      setPinPending(false);
+    }
+  };
 
   return (
     <>
@@ -454,6 +498,24 @@ function StoryInteractions({ story }: { story: Story }) {
           >
             <Share2 className="h-5 w-5" />
           </Button>
+
+          {isOwnStory && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`gap-2 text-white hover:bg-white/20 ${isPinned ? "text-rose-300" : ""}`}
+              onClick={handlePinToggle}
+              disabled={pinPending}
+              data-ocid="story-pin-btn"
+              title={isPinned ? "Unpin from Highlights" : "Pin to Highlights"}
+            >
+              {isPinned ? (
+                <BookmarkCheck className="h-5 w-5 fill-rose-400 text-rose-300" />
+              ) : (
+                <Bookmark className="h-5 w-5" />
+              )}
+            </Button>
+          )}
         </div>
       </div>
 

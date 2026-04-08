@@ -664,14 +664,19 @@ export function useEditMessage() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mutationFn: async ({
       conversationId,
       messageId,
-      newContent,
-    }: { conversationId: bigint; messageId: bigint; newContent: any }) => {
+      newText,
+    }: { conversationId: bigint; messageId: bigint; newText: string }) => {
       if (!actor) throw new Error("Actor not available");
-      await actor.editMessage(conversationId, messageId, newContent);
+      const result = await actor.editMessage(
+        conversationId,
+        messageId,
+        newText,
+      );
+      if (result.__kind__ === "err") throw new Error(result.err);
+      return result.ok;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -689,7 +694,125 @@ export function useDeleteMessage() {
       messageId,
     }: { conversationId: bigint; messageId: bigint }) => {
       if (!actor) throw new Error("Actor not available");
-      await actor.deleteMessage(conversationId, messageId);
+      const result = await actor.deleteMessage(conversationId, messageId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+}
+
+export function useForwardMessage() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      sourceConversationId,
+      messageId,
+      targetConversationId,
+      targetGroupId,
+    }: {
+      sourceConversationId: bigint;
+      messageId: bigint;
+      targetConversationId?: bigint;
+      targetGroupId?: bigint;
+    }) => {
+      if (!actor) throw new Error("Actor not available");
+      if (targetConversationId !== undefined) {
+        const result = await actor.forwardMessage(
+          sourceConversationId,
+          messageId,
+          targetConversationId,
+        );
+        if (result.__kind__ === "err") throw new Error(result.err);
+        return result.ok;
+      }
+      if (targetGroupId !== undefined) {
+        const result = await actor.forwardMessageToGroup(
+          sourceConversationId,
+          messageId,
+          targetGroupId,
+        );
+        if (result.__kind__ === "err") throw new Error(result.err);
+        return result.ok;
+      }
+      throw new Error("Must specify targetConversationId or targetGroupId");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["groupMessages"] });
+    },
+  });
+}
+
+export function useEditGroupMessage() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      messageId,
+      newText,
+    }: { groupId: bigint; messageId: bigint; newText: string }) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.editGroupMessage(groupId, messageId, newText);
+      if (result.__kind__ === "err") throw new Error(result.err);
+      return result.ok;
+    },
+    onSuccess: (_, { groupId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["groupMessages", groupId.toString()],
+      });
+    },
+  });
+}
+
+export function useDeleteGroupMessage() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      messageId,
+    }: { groupId: bigint; messageId: bigint }) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.deleteGroupMessage(groupId, messageId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: (_, { groupId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["groupMessages", groupId.toString()],
+      });
+    },
+  });
+}
+
+export function useForwardGroupMessageToConversation() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      sourceGroupId,
+      messageId,
+      targetConversationId,
+    }: {
+      sourceGroupId: bigint;
+      messageId: bigint;
+      targetConversationId: bigint;
+    }) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.forwardGroupMessageToConversation(
+        sourceGroupId,
+        messageId,
+        targetConversationId,
+      );
+      if (result.__kind__ === "err") throw new Error(result.err);
+      return result.ok;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -936,6 +1059,52 @@ export function useMarkStoryAsViewed() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["activeStories"] });
     },
+  });
+}
+
+export function usePinStory() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (storyId: bigint) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.pinStory(storyId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pinnedStories"] });
+    },
+  });
+}
+
+export function useUnpinStory() {
+  const { actor } = useActor();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (storyId: bigint) => {
+      if (!actor) throw new Error("Actor not available");
+      const result = await actor.unpinStory(storyId);
+      if (result.__kind__ === "err") throw new Error(result.err);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pinnedStories"] });
+    },
+  });
+}
+
+export function useGetPinnedStories(userId: Principal | string | null) {
+  const { actor } = useActor();
+  const userIdStr = userId ? toPrincipal(userId).toText() : null;
+
+  return useQuery<Story[]>({
+    queryKey: ["pinnedStories", userIdStr],
+    queryFn: async () => {
+      if (!actor || !userId) return [];
+      return actor.getPinnedStories(toPrincipal(userId));
+    },
+    enabled: !!actor && !!userId,
   });
 }
 

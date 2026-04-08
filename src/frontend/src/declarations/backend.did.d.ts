@@ -51,17 +51,21 @@ export interface GroupChat {
 }
 export interface GroupMessage {
   'id' : bigint,
+  'isDeleted' : boolean,
   'content' : MessageType,
   'senderProfile' : [] | [UserProfile],
   'sender' : Principal,
   'groupId' : bigint,
+  'isEdited' : boolean,
   'timestamp' : Time,
 }
 export interface Message {
   'id' : bigint,
+  'isDeleted' : boolean,
   'content' : MessageType,
   'senderProfile' : [] | [UserProfile],
   'sender' : Principal,
+  'isEdited' : boolean,
   'timestamp' : Time,
   'receiver' : Principal,
 }
@@ -303,13 +307,46 @@ export interface _SERVICE {
   'createStory' : ActorMethod<[MessageType], bigint>,
   'deleteCallerProfile' : ActorMethod<[], undefined>,
   'deleteComment' : ActorMethod<[string, bigint], undefined>,
-  'deleteMessage' : ActorMethod<[bigint, bigint], undefined>,
+  'deleteGroupMessage' : ActorMethod<
+    [bigint, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
+  'deleteMessage' : ActorMethod<
+    [bigint, bigint],
+    { 'ok' : null } |
+      { 'err' : string }
+  >,
   'deleteNotification' : ActorMethod<[bigint], undefined>,
   'deletePost' : ActorMethod<[string], undefined>,
-  'editMessage' : ActorMethod<[bigint, bigint, MessageType], undefined>,
+  'editGroupMessage' : ActorMethod<
+    [bigint, bigint, string],
+    { 'ok' : GroupMessage } |
+      { 'err' : string }
+  >,
+  'editMessage' : ActorMethod<
+    [bigint, bigint, string],
+    { 'ok' : Message } |
+      { 'err' : string }
+  >,
   'editPost' : ActorMethod<[string, string, [] | [ExternalBlob]], undefined>,
   'filterProfiles' : ActorMethod<[ProfileFilter], Array<ProfileWithPrincipal>>,
   'followUser' : ActorMethod<[Principal], undefined>,
+  'forwardGroupMessageToConversation' : ActorMethod<
+    [bigint, bigint, bigint],
+    { 'ok' : Message } |
+      { 'err' : string }
+  >,
+  'forwardMessage' : ActorMethod<
+    [bigint, bigint, bigint],
+    { 'ok' : Message } |
+      { 'err' : string }
+  >,
+  'forwardMessageToGroup' : ActorMethod<
+    [bigint, bigint, bigint],
+    { 'ok' : GroupMessage } |
+      { 'err' : string }
+  >,
   'forwardPostToConversation' : ActorMethod<[string, bigint], undefined>,
   'getActiveStories' : ActorMethod<[], Array<Story>>,
   'getAllBlockRecords' : ActorMethod<[], Array<BlockRecord>>,
@@ -329,6 +366,7 @@ export interface _SERVICE {
   'getIcpUsdExchangeRate' : ActorMethod<[], number>,
   'getNotificationCountByType' : ActorMethod<[], NotificationCount>,
   'getNotifications' : ActorMethod<[], Array<Notification>>,
+  'getPinnedStories' : ActorMethod<[Principal], Array<Story>>,
   'getPinnedTrendingPost' : ActorMethod<[], [] | [Post]>,
   'getPostComments' : ActorMethod<[string], Array<CommentInteraction>>,
   'getPostInteractions' : ActorMethod<
@@ -375,6 +413,7 @@ export interface _SERVICE {
   'markNotificationAsRead' : ActorMethod<[bigint], undefined>,
   'markStoryAsViewed' : ActorMethod<[bigint], undefined>,
   'pinPostToTrending' : ActorMethod<[string], undefined>,
+  'pinStory' : ActorMethod<[bigint], { 'ok' : null } | { 'err' : string }>,
   'removeGroupParticipant' : ActorMethod<[bigint, Principal], undefined>,
   'requestBuyRoses' : ActorMethod<[number], string>,
   'requestSellRoses' : ActorMethod<[number], string>,
@@ -389,6 +428,7 @@ export interface _SERVICE {
   'unfollowUser' : ActorMethod<[Principal], undefined>,
   'universalSearch' : ActorMethod<[string, [] | [bigint]], Array<SearchResult>>,
   'unlikePost' : ActorMethod<[string], undefined>,
+  'unpinStory' : ActorMethod<[bigint], { 'ok' : null } | { 'err' : string }>,
   'unpinTrendingPost' : ActorMethod<[], undefined>,
   'unsavePost' : ActorMethod<[string], undefined>,
   'updateGroupAvatar' : ActorMethod<[bigint, [] | [ExternalBlob]], undefined>,

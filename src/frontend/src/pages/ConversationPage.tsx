@@ -14,8 +14,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -27,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Principal } from "@icp-sdk/core/principal";
 import { useNavigate, useParams } from "@tanstack/react-router";
@@ -34,19 +33,28 @@ import {
   ArrowLeft,
   Ban,
   Camera,
+  Check,
+  Edit2,
   Forward as ForwardIcon,
   Image as ImageIcon,
   LogOut,
   Mic,
-  MoreVertical,
+  MoreHorizontal,
   Send,
   ShieldOff,
   Trash2,
   Video,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ExternalBlob, type Message, type MessageType } from "../backend";
+import {
+  type Conversation,
+  ExternalBlob,
+  type GroupChat,
+  type Message,
+  type MessageType,
+} from "../backend";
 import ExpiredMediaPlaceholder from "../components/ExpiredMediaPlaceholder";
 import LoginButton from "../components/LoginButton";
 import ProfileLinkMessageText from "../components/ProfileLinkMessageText";
@@ -56,7 +64,11 @@ import VoiceRecorder from "../components/VoiceRecorder";
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
 import {
   useBlockUser,
+  useDeleteMessage,
+  useEditMessage,
+  useForwardMessage,
   useGetConversations,
+  useGetGroupChats,
   useGetRoseBalance,
   useGetUserProfile,
   useIsUserBlocked,
@@ -65,10 +77,11 @@ import {
   useUnblockUser,
 } from "../hooks/useQueries";
 import { isMediaExpired } from "../lib/mediaExpiration";
+import { getMimeType } from "../lib/mimeTypes";
 import { containsProfileLink } from "../lib/profileLinkDetection";
 import { getVideoUploadWarning } from "../lib/videoUploadGuidance";
 
-// Enhanced video player component with unified MIME type handling and error handling
+// Enhanced video player with unified MIME type handling
 function EnhancedVideoPlayer({
   src,
   onPlay,
@@ -81,31 +94,10 @@ function EnhancedVideoPlayer({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-
-    // Unified MIME type detection for all video formats
-    const getMimeType = (url: string): string => {
-      const ext = url.split(".").pop()?.toLowerCase();
-      switch (ext) {
-        case "mp4":
-          return "video/mp4";
-        case "webm":
-          return "video/webm";
-        case "mov":
-          return "video/quicktime";
-        case "avi":
-          return "video/x-msvideo";
-        default:
-          return "video/mp4";
-      }
-    };
-
-    // Set video source with proper MIME type for mobile compatibility
     const source = document.createElement("source");
     source.src = src;
     source.type = getMimeType(src);
     video.appendChild(source);
-
-    // Handle play/pause events
     const handlePlay = () => {
       setIsPlaying(true);
       if (!hasTrackedView && onPlay) {
@@ -114,17 +106,11 @@ function EnhancedVideoPlayer({
       }
     };
     const handlePause = () => setIsPlaying(false);
-
-    // Handle video errors
-    const handleError = () => {
-      console.error("Video playback error");
+    const handleError = () =>
       toast.error("This video format may not be supported on your device.");
-    };
-
     video.addEventListener("play", handlePlay);
     video.addEventListener("pause", handlePause);
     video.addEventListener("error", handleError);
-
     return () => {
       video.removeEventListener("play", handlePlay);
       video.removeEventListener("pause", handlePause);
@@ -135,17 +121,12 @@ function EnhancedVideoPlayer({
   const handleVideoClick = async () => {
     const video = videoRef.current;
     if (!video) return;
-
     setHasInteracted(true);
-
     if (video.paused) {
       try {
         await video.play();
-      } catch (err) {
-        console.error("Video play failed:", err);
-        toast.error(
-          "Failed to play video. This format may not be supported on your device.",
-        );
+      } catch {
+        toast.error("Failed to play video.");
       }
     } else {
       video.pause();
@@ -179,7 +160,7 @@ function EnhancedVideoPlayer({
   );
 }
 
-// Enhanced audio player component with unified MIME type handling and error handling
+// Enhanced audio player with unified MIME type handling
 function EnhancedAudioPlayer({
   src,
   type,
@@ -191,47 +172,20 @@ function EnhancedAudioPlayer({
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-
-    // Unified MIME type detection for all audio formats
-    const getMimeType = (url: string): string => {
-      const ext = url.split(".").pop()?.toLowerCase();
-      switch (ext) {
-        case "mp3":
-          return "audio/mpeg";
-        case "wav":
-          return "audio/wav";
-        case "ogg":
-          return "audio/ogg";
-        case "webm":
-          return "audio/webm";
-        default:
-          return "audio/mpeg";
-      }
-    };
-
-    // Set audio source with proper MIME type for mobile compatibility
     const source = document.createElement("source");
     source.src = src;
     source.type = getMimeType(src);
     audio.appendChild(source);
-
-    // Track view on first play
     const handlePlay = () => {
       if (!hasTrackedView && onPlay) {
         onPlay();
         setHasTrackedView(true);
       }
     };
-
-    // Handle audio errors
-    const handleError = () => {
-      console.error("Audio playback error");
+    const handleError = () =>
       toast.error("This audio format may not be supported on your device.");
-    };
-
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("error", handleError);
-
     return () => {
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("error", handleError);
@@ -251,29 +205,216 @@ function EnhancedAudioPlayer({
   );
 }
 
+// Forward message modal — picks a conversation or group to forward to
+type ForwardTarget =
+  | { kind: "conversation"; id: bigint; name: string; avatar?: string }
+  | { kind: "group"; id: bigint; name: string; avatar?: string };
+
+function ForwardMessageModal({
+  open,
+  onClose,
+  onForward,
+  conversations,
+  groups,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onForward: (target: ForwardTarget) => void;
+  conversations: Conversation[];
+  groups: GroupChat[];
+}) {
+  const [search, setSearch] = useState("");
+
+  const targets: ForwardTarget[] = [
+    ...conversations.map((c) => ({
+      kind: "conversation" as const,
+      id: c.id,
+      name:
+        c.otherParticipantProfile?.name || `Conversation ${c.id.toString()}`,
+      avatar: c.otherParticipantProfile?.profilePicture?.getDirectURL(),
+    })),
+    ...groups.map((g) => ({
+      kind: "group" as const,
+      id: g.id,
+      name: g.name,
+      avatar: g.avatar?.getDirectURL(),
+    })),
+  ];
+
+  const filtered = search.trim()
+    ? targets.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
+    : targets;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-rose-600">
+            <ForwardIcon className="h-4 w-4" />
+            Forward Message
+          </DialogTitle>
+        </DialogHeader>
+        <div className="relative mb-2">
+          <Input
+            placeholder="Search conversations or groups..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pr-8 text-sm border-rose-200 focus:border-rose-400"
+          />
+          {search && (
+            <button
+              type="button"
+              className="absolute right-2 top-2.5 text-muted-foreground"
+              onClick={() => setSearch("")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <ScrollArea className="max-h-72">
+          {filtered.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground py-6">
+              No conversations or groups found
+            </p>
+          ) : (
+            <div className="space-y-1">
+              {filtered.map((target) => (
+                <button
+                  key={`${target.kind}-${target.id.toString()}`}
+                  type="button"
+                  onClick={() => {
+                    onForward(target);
+                    onClose();
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-rose-50 transition-colors text-left"
+                >
+                  <div className="w-9 h-9 rounded-full bg-rose-100 flex items-center justify-center overflow-hidden flex-shrink-0">
+                    {target.avatar ? (
+                      <img
+                        src={target.avatar}
+                        alt={target.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-rose-600 text-xs font-bold">
+                        {target.name.slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {target.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {target.kind === "group" ? "Group" : "Direct message"}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Per-message action menu
+function MessageActions({
+  message,
+  isOwn,
+  onEdit,
+  onDelete,
+  onForward,
+}: {
+  message: Message;
+  isOwn: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+  onForward: () => void;
+}) {
+  const isText = message.content.__kind__ === "text";
+  const isDeleted = message.isDeleted;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded hover:bg-black/10 text-muted-foreground flex-shrink-0"
+          aria-label="Message actions"
+          data-ocid="msg-actions-trigger"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={isOwn ? "end" : "start"}
+        className="min-w-[140px]"
+      >
+        {!isDeleted && (
+          <DropdownMenuItem
+            onClick={onForward}
+            className="gap-2 cursor-pointer"
+          >
+            <ForwardIcon className="h-3.5 w-3.5 text-rose-500" />
+            Forward
+          </DropdownMenuItem>
+        )}
+        {isOwn && isText && !isDeleted && (
+          <DropdownMenuItem onClick={onEdit} className="gap-2 cursor-pointer">
+            <Edit2 className="h-3.5 w-3.5 text-blue-500" />
+            Edit
+          </DropdownMenuItem>
+        )}
+        {isOwn && !isDeleted && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={onDelete}
+              className="gap-2 cursor-pointer text-destructive focus:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export default function ConversationPage() {
   const { identity } = useInternetIdentity();
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/chats/$conversationId" });
 
   const { data: conversations, isLoading } = useGetConversations();
+  const { data: groups = [] } = useGetGroupChats();
   const { data: roseBalance } = useGetRoseBalance();
   const sendMessage = useSendMessage();
   const leaveConversation = useLeaveConversation();
   const blockUser = useBlockUser();
   const unblockUser = useUnblockUser();
+  const editMessage = useEditMessage();
+  const deleteMessage = useDeleteMessage();
+  const forwardMessage = useForwardMessage();
 
   const [messageText, setMessageText] = useState("");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [showVoiceRecorder, setShowVoiceRecorder] = useState(false);
   const [showVideoRecorder, setShowVideoRecorder] = useState(false);
   const [showRoseGift, setShowRoseGift] = useState(false);
-  const [_showForwardDialog, _setShowForwardDialog] = useState(false);
-  const [_selectedMessageToForward, _setSelectedMessageToForward] =
-    useState<Message | null>(null);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [showBlockDialog, setShowBlockDialog] = useState(false);
   const [showUnblockDialog, setShowUnblockDialog] = useState(false);
+  // Edit state
+  const [editingMessageId, setEditingMessageId] = useState<bigint | null>(null);
+  const [editText, setEditText] = useState("");
+  // Forward state
+  const [forwardingMessage, setForwardingMessage] = useState<Message | null>(
+    null,
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -289,31 +430,26 @@ export default function ConversationPage() {
     // Not a valid principal, treat as conversation ID
   }
 
-  // Find existing conversation by ID or by participant principal
   const conversation = conversations?.find((conv) => {
     if (conv.id.toString() === conversationId) return true;
     if (targetPrincipal) {
       return conv.participants.some(
-        (p) => p.toString() === targetPrincipal.toString(),
+        (p) => p.toString() === targetPrincipal!.toString(),
       );
     }
     return false;
   });
 
-  // Determine the other participant
   let otherParticipant: Principal | null = null;
   if (conversation) {
-    // Existing conversation - get other participant from conversation
     otherParticipant =
       conversation.participants.find(
         (p) => p.toString() !== identity?.getPrincipal().toString(),
       ) || null;
   } else if (isNewChatFlow && targetPrincipal) {
-    // New chat flow - use the target principal
     otherParticipant = targetPrincipal;
   }
 
-  // Fetch target user profile for new chat flow
   const { data: targetUserProfile } = useGetUserProfile(
     otherParticipant || Principal.anonymous(),
   );
@@ -329,57 +465,34 @@ export default function ConversationPage() {
   const handleSendTextMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageText.trim() || !otherParticipant) return;
-
-    const content: MessageType = {
-      __kind__: "text",
-      text: messageText.trim(),
-    };
-
+    const content: MessageType = { __kind__: "text", text: messageText.trim() };
     try {
-      await sendMessage.mutateAsync({
-        receiver: otherParticipant,
-        content,
-      });
+      await sendMessage.mutateAsync({ receiver: otherParticipant, content });
       setMessageText("");
-    } catch (error) {
+    } catch {
       toast.error("Failed to send message");
-      console.error(error);
     }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !otherParticipant) return;
-
     if (!file.type.startsWith("image/")) {
       toast.error("Please select an image file");
       return;
     }
-
     try {
       setUploadProgress(0);
-      const arrayBuffer = await file.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      const blob = ExternalBlob.fromBytes(uint8Array).withUploadProgress(
-        (percentage) => {
-          setUploadProgress(percentage);
-        },
-      );
-
-      const content: MessageType = {
-        __kind__: "image",
-        image: blob,
-      };
-
+      const blob = ExternalBlob.fromBytes(
+        new Uint8Array(await file.arrayBuffer()),
+      ).withUploadProgress((p) => setUploadProgress(p));
       await sendMessage.mutateAsync({
         receiver: otherParticipant,
-        content,
+        content: { __kind__: "image", image: blob },
       });
-
       toast.success("Image sent!");
-    } catch (error) {
+    } catch {
       toast.error("Failed to send image");
-      console.error(error);
     } finally {
       setUploadProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -389,42 +502,24 @@ export default function ConversationPage() {
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !otherParticipant) return;
-
     if (!file.type.startsWith("video/")) {
       toast.error("Please select a video file");
       return;
     }
-
-    // Show upload guidance warning if format is not ideal
     const warning = getVideoUploadWarning(file);
-    if (warning) {
-      toast.warning(warning, { duration: 5000 });
-    }
-
+    if (warning) toast.warning(warning, { duration: 5000 });
     try {
       setUploadProgress(0);
-      const arrayBuffer = await file.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      const blob = ExternalBlob.fromBytes(uint8Array).withUploadProgress(
-        (percentage) => {
-          setUploadProgress(percentage);
-        },
-      );
-
-      const content: MessageType = {
-        __kind__: "video",
-        video: blob,
-      };
-
+      const blob = ExternalBlob.fromBytes(
+        new Uint8Array(await file.arrayBuffer()),
+      ).withUploadProgress((p) => setUploadProgress(p));
       await sendMessage.mutateAsync({
         receiver: otherParticipant,
-        content,
+        content: { __kind__: "video", video: blob },
       });
-
       toast.success("Video sent!");
-    } catch (error) {
+    } catch {
       toast.error("Failed to send video");
-      console.error(error);
     } finally {
       setUploadProgress(null);
       if (videoInputRef.current) videoInputRef.current.value = "";
@@ -433,102 +528,127 @@ export default function ConversationPage() {
 
   const handleVoiceRecorded = async (audioBlob: Blob) => {
     if (!otherParticipant) return;
-
     try {
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      const blob = ExternalBlob.fromBytes(uint8Array);
-
-      const content: MessageType = {
-        __kind__: "voice",
-        voice: blob,
-      };
-
+      const blob = ExternalBlob.fromBytes(
+        new Uint8Array(await audioBlob.arrayBuffer()),
+      );
       await sendMessage.mutateAsync({
         receiver: otherParticipant,
-        content,
+        content: { __kind__: "voice", voice: blob },
       });
-
       setShowVoiceRecorder(false);
       toast.success("Voice message sent!");
-    } catch (error) {
+    } catch {
       toast.error("Failed to send voice message");
-      console.error(error);
     }
   };
 
   const handleVideoRecorded = async (videoBlob: Blob) => {
     if (!otherParticipant) return;
-
     try {
-      const arrayBuffer = await videoBlob.arrayBuffer();
-      const uint8Array = new Uint8Array(arrayBuffer);
-      const blob = ExternalBlob.fromBytes(uint8Array);
-
-      const content: MessageType = {
-        __kind__: "video",
-        video: blob,
-      };
-
+      const blob = ExternalBlob.fromBytes(
+        new Uint8Array(await videoBlob.arrayBuffer()),
+      );
       await sendMessage.mutateAsync({
         receiver: otherParticipant,
-        content,
+        content: { __kind__: "video", video: blob },
       });
-
       setShowVideoRecorder(false);
       toast.success("Video message sent!");
-    } catch (error) {
+    } catch {
       toast.error("Failed to send video message");
-      console.error(error);
     }
   };
 
   const handleRoseGift = async (amount: number) => {
     if (!otherParticipant) return;
-
-    const content: MessageType = {
-      __kind__: "rose",
-      rose: amount,
-    };
-
     await sendMessage.mutateAsync({
       receiver: otherParticipant,
-      content,
+      content: { __kind__: "rose", rose: amount },
     });
   };
 
   const handleLeaveConversation = async () => {
     if (!conversation) return;
-
     try {
       await leaveConversation.mutateAsync(conversation.id);
       toast.success("Left conversation");
       navigate({ to: "/chats" });
-    } catch (error: any) {
-      toast.error(error.message || "Failed to leave conversation");
+    } catch (error: unknown) {
+      toast.error((error as Error).message || "Failed to leave conversation");
     }
   };
 
   const handleBlockUser = async () => {
     if (!otherParticipant) return;
-
     try {
       await blockUser.mutateAsync(otherParticipant);
       toast.success("User blocked");
       navigate({ to: "/chats" });
-    } catch (error: any) {
-      toast.error(error.message || "Failed to block user");
+    } catch (error: unknown) {
+      toast.error((error as Error).message || "Failed to block user");
     }
   };
 
   const handleUnblockUser = async () => {
     if (!otherParticipant) return;
-
     try {
       await unblockUser.mutateAsync(otherParticipant);
       toast.success("User unblocked");
-    } catch (error: any) {
-      toast.error(error.message || "Failed to unblock user");
+    } catch (error: unknown) {
+      toast.error((error as Error).message || "Failed to unblock user");
+    }
+  };
+
+  const handleEditMessage = async (msg: Message) => {
+    if (!conversation) return;
+    if (!editText.trim()) return;
+    try {
+      await editMessage.mutateAsync({
+        conversationId: conversation.id,
+        messageId: msg.id,
+        newText: editText.trim(),
+      });
+      setEditingMessageId(null);
+      setEditText("");
+      toast.success("Message edited");
+    } catch {
+      toast.error("Failed to edit message");
+    }
+  };
+
+  const handleDeleteMessage = async (msg: Message) => {
+    if (!conversation) return;
+    try {
+      await deleteMessage.mutateAsync({
+        conversationId: conversation.id,
+        messageId: msg.id,
+      });
+      toast.success("Message deleted");
+    } catch {
+      toast.error("Failed to delete message");
+    }
+  };
+
+  const handleForwardMessage = async (msg: Message, target: ForwardTarget) => {
+    if (!conversation) return;
+    try {
+      if (target.kind === "conversation") {
+        await forwardMessage.mutateAsync({
+          sourceConversationId: conversation.id,
+          messageId: msg.id,
+          targetConversationId: target.id,
+        });
+      } else {
+        await forwardMessage.mutateAsync({
+          sourceConversationId: conversation.id,
+          messageId: msg.id,
+          targetGroupId: target.id,
+        });
+      }
+      toast.success(`Forwarded to ${target.name}`);
+    } catch {
+      toast.error("Failed to forward message");
     }
   };
 
@@ -540,11 +660,12 @@ export default function ConversationPage() {
       senderProfile?.name || `${message.sender.toString().slice(0, 12)}...`;
     const avatarUrl = senderProfile?.profilePicture?.getDirectURL();
     const mediaExpired = isMediaExpired(message.timestamp);
+    const isEditing = editingMessageId === message.id;
 
     return (
       <div
         key={message.id.toString()}
-        className={`flex gap-2 mb-3 sm:mb-4 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
+        className={`flex gap-2 mb-3 sm:mb-4 group ${isOwn ? "flex-row-reverse" : "flex-row"}`}
       >
         {!isOwn && (
           <Avatar className="h-6 w-6 sm:h-8 sm:w-8 shrink-0">
@@ -561,119 +682,186 @@ export default function ConversationPage() {
           className={`flex flex-col ${isOwn ? "items-end" : "items-start"} max-w-[75%] sm:max-w-[70%]`}
         >
           <div
-            className={`${
-              isOwn ? "bg-primary text-primary-foreground" : "bg-muted"
-            } rounded-lg p-2 sm:p-3`}
+            className={`flex items-center gap-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
           >
-            {message.content.__kind__ === "text" &&
-              (containsProfileLink(message.content.text) ? (
-                <ProfileLinkMessageText text={message.content.text} />
-              ) : (
-                <p className="text-xs sm:text-sm break-words">
-                  {message.content.text}
+            <div
+              className={`${isOwn ? "bg-primary text-primary-foreground" : "bg-muted"} rounded-lg p-2 sm:p-3 min-w-0`}
+            >
+              {message.isDeleted ? (
+                <p className="text-xs sm:text-sm italic text-muted-foreground">
+                  [Message deleted]
                 </p>
-              ))}
-            {message.content.__kind__ === "image" &&
-              (mediaExpired ? (
-                <ExpiredMediaPlaceholder
-                  mediaType="image"
-                  className="max-w-full"
-                />
-              ) : (
-                <img
-                  src={message.content.image.getDirectURL()}
-                  alt="Shared media"
-                  className="max-w-full rounded max-h-64 sm:max-h-96 object-contain"
-                />
-              ))}
-            {message.content.__kind__ === "video" &&
-              (mediaExpired ? (
-                <ExpiredMediaPlaceholder
-                  mediaType="video"
-                  className="max-w-full"
-                />
-              ) : (
-                <EnhancedVideoPlayer
-                  src={message.content.video.getDirectURL()}
-                />
-              ))}
-            {message.content.__kind__ === "voice" &&
-              (mediaExpired ? (
-                <ExpiredMediaPlaceholder
-                  mediaType="voice"
-                  className="max-w-full"
-                />
-              ) : (
-                <EnhancedAudioPlayer
-                  src={message.content.voice.getDirectURL()}
-                  type="voice"
-                />
-              ))}
-            {message.content.__kind__ === "media" &&
-              (mediaExpired ? (
-                <ExpiredMediaPlaceholder
-                  mediaType="media"
-                  className="max-w-full"
-                />
-              ) : (
-                <EnhancedAudioPlayer
-                  src={message.content.media.getDirectURL()}
-                  type="media"
-                />
-              ))}
-            {message.content.__kind__ === "rose" && (
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">🌹</span>
-                <span className="font-semibold">
-                  {message.content.rose.toFixed(2)} Roses
-                </span>
-              </div>
-            )}
-            {message.content.__kind__ === "receipt" && (
-              <div className="space-y-1 text-xs sm:text-sm">
-                <p className="font-semibold">Transaction Receipt</p>
-                <p>{message.content.receipt.summary}</p>
-                <p className="text-[10px] sm:text-xs opacity-75">
-                  Fee: {message.content.receipt.fee.toFixed(2)} ROSES
-                </p>
-              </div>
-            )}
-            {message.content.__kind__ === "tradeRequest" && (
-              <div className="space-y-1 text-xs sm:text-sm">
-                <p className="font-semibold">Trade Request</p>
-                <p>{message.content.tradeRequest.summary}</p>
-              </div>
-            )}
-            {message.content.__kind__ === "forwardedPost" && (
-              <div className="space-y-2 text-xs sm:text-sm">
-                <p className="font-semibold flex items-center gap-1">
-                  <ForwardIcon className="h-3 w-3" />
-                  Forwarded Post
-                </p>
-                <div className="bg-background/50 rounded p-2">
-                  {message.content.forwardedPost.image && (
-                    <img
-                      src={message.content.forwardedPost.image.getDirectURL()}
-                      alt="Post"
-                      className="w-full rounded mb-2 max-h-32 object-cover"
-                    />
-                  )}
-                  <p className="line-clamp-3">
-                    {message.content.forwardedPost.contentSnippet}
-                  </p>
+              ) : isEditing ? (
+                <div className="flex gap-2 min-w-[200px]">
+                  <Input
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="flex-1 text-xs h-7 bg-background/20 border-0 text-inherit placeholder:text-inherit/60"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleEditMessage(message);
+                      if (e.key === "Escape") {
+                        setEditingMessageId(null);
+                        setEditText("");
+                      }
+                    }}
+                    data-ocid="msg-edit-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleEditMessage(message)}
+                    className="text-green-400 hover:text-green-300"
+                  >
+                    <Check className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMessageId(null);
+                      setEditText("");
+                    }}
+                    className="text-muted-foreground/70 hover:text-muted-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
+              ) : (
+                <>
+                  {message.content.__kind__ === "text" &&
+                    (containsProfileLink(message.content.text) ? (
+                      <ProfileLinkMessageText text={message.content.text} />
+                    ) : (
+                      <p className="text-xs sm:text-sm break-words">
+                        {message.content.text}
+                      </p>
+                    ))}
+                  {message.content.__kind__ === "image" &&
+                    (mediaExpired ? (
+                      <ExpiredMediaPlaceholder
+                        mediaType="image"
+                        className="max-w-full"
+                      />
+                    ) : (
+                      <img
+                        src={message.content.image.getDirectURL()}
+                        alt="Shared media"
+                        className="max-w-full rounded max-h-64 sm:max-h-96 object-contain"
+                      />
+                    ))}
+                  {message.content.__kind__ === "video" &&
+                    (mediaExpired ? (
+                      <ExpiredMediaPlaceholder
+                        mediaType="video"
+                        className="max-w-full"
+                      />
+                    ) : (
+                      <EnhancedVideoPlayer
+                        src={message.content.video.getDirectURL()}
+                      />
+                    ))}
+                  {message.content.__kind__ === "voice" &&
+                    (mediaExpired ? (
+                      <ExpiredMediaPlaceholder
+                        mediaType="voice"
+                        className="max-w-full"
+                      />
+                    ) : (
+                      <EnhancedAudioPlayer
+                        src={message.content.voice.getDirectURL()}
+                        type="voice"
+                      />
+                    ))}
+                  {message.content.__kind__ === "media" &&
+                    (mediaExpired ? (
+                      <ExpiredMediaPlaceholder
+                        mediaType="media"
+                        className="max-w-full"
+                      />
+                    ) : (
+                      <EnhancedAudioPlayer
+                        src={message.content.media.getDirectURL()}
+                        type="media"
+                      />
+                    ))}
+                  {message.content.__kind__ === "rose" && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">🌹</span>
+                      <span className="font-semibold">
+                        {message.content.rose.toFixed(2)} Roses
+                      </span>
+                    </div>
+                  )}
+                  {message.content.__kind__ === "receipt" && (
+                    <div className="space-y-1 text-xs sm:text-sm">
+                      <p className="font-semibold">Transaction Receipt</p>
+                      <p>{message.content.receipt.summary}</p>
+                      <p className="text-[10px] sm:text-xs opacity-75">
+                        Fee: {message.content.receipt.fee.toFixed(2)} ROSES
+                      </p>
+                    </div>
+                  )}
+                  {message.content.__kind__ === "tradeRequest" && (
+                    <div className="space-y-1 text-xs sm:text-sm">
+                      <p className="font-semibold">Trade Request</p>
+                      <p>{message.content.tradeRequest.summary}</p>
+                    </div>
+                  )}
+                  {message.content.__kind__ === "forwardedPost" && (
+                    <div className="space-y-2 text-xs sm:text-sm">
+                      <p className="font-semibold flex items-center gap-1">
+                        <ForwardIcon className="h-3 w-3" />
+                        Forwarded Post
+                      </p>
+                      <div className="bg-background/50 rounded p-2">
+                        {message.content.forwardedPost.image && (
+                          <img
+                            src={message.content.forwardedPost.image.getDirectURL()}
+                            alt="Post"
+                            className="w-full rounded mb-2 max-h-32 object-cover"
+                          />
+                        )}
+                        <p className="line-clamp-3">
+                          {message.content.forwardedPost.contentSnippet}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            {/* Action button — subtle, shows on hover/always on mobile */}
+            {!message.isDeleted && (
+              <div className="sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                <MessageActions
+                  message={message}
+                  isOwn={isOwn}
+                  onEdit={() => {
+                    setEditingMessageId(message.id);
+                    setEditText(
+                      message.content.__kind__ === "text"
+                        ? message.content.text
+                        : "",
+                    );
+                  }}
+                  onDelete={() => handleDeleteMessage(message)}
+                  onForward={() => setForwardingMessage(message)}
+                />
               </div>
             )}
           </div>
-          <span className="text-[10px] text-muted-foreground mt-1">
-            {new Date(Number(message.timestamp) / 1_000_000).toLocaleTimeString(
-              [],
-              {
-                hour: "2-digit",
-                minute: "2-digit",
-              },
+          <div
+            className={`flex items-center gap-1.5 mt-1 ${isOwn ? "flex-row-reverse" : "flex-row"}`}
+          >
+            <span className="text-[10px] text-muted-foreground">
+              {new Date(
+                Number(message.timestamp) / 1_000_000,
+              ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+            {message.isEdited && !message.isDeleted && (
+              <span className="text-[10px] text-muted-foreground italic">
+                (edited)
+              </span>
             )}
-          </span>
+          </div>
         </div>
       </div>
     );
@@ -710,7 +898,6 @@ export default function ConversationPage() {
     );
   }
 
-  // Show "not found" only if it's not a valid principal and no conversation exists
   if (!conversation && !isNewChatFlow) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] px-4">
@@ -731,7 +918,6 @@ export default function ConversationPage() {
     );
   }
 
-  // Determine display profile for header
   const displayProfile =
     conversation?.otherParticipantProfile || targetUserProfile;
   const displayName =
@@ -792,7 +978,7 @@ export default function ConversationPage() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="shrink-0">
-              <MoreVertical className="h-4 w-4 sm:h-5 sm:w-5" />
+              <MoreHorizontal className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -865,7 +1051,6 @@ export default function ConversationPage() {
             </p>
           </div>
         )}
-
         <div className="flex items-center gap-2">
           <div className="flex gap-1 sm:gap-2">
             <Button
@@ -885,7 +1070,6 @@ export default function ConversationPage() {
               onChange={handleImageUpload}
               className="hidden"
             />
-
             <Button
               type="button"
               variant="ghost"
@@ -903,7 +1087,6 @@ export default function ConversationPage() {
               onChange={handleVideoUpload}
               className="hidden"
             />
-
             <Button
               type="button"
               variant="ghost"
@@ -914,7 +1097,6 @@ export default function ConversationPage() {
             >
               <Mic className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-
             <Button
               type="button"
               variant="ghost"
@@ -925,7 +1107,6 @@ export default function ConversationPage() {
             >
               <Camera className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
-
             <Button
               type="button"
               variant="ghost"
@@ -937,7 +1118,6 @@ export default function ConversationPage() {
               <span className="text-base sm:text-lg">🌹</span>
             </Button>
           </div>
-
           <form onSubmit={handleSendTextMessage} className="flex-1 flex gap-2">
             <Input
               value={messageText}
@@ -945,6 +1125,7 @@ export default function ConversationPage() {
               placeholder="Type a message..."
               disabled={!otherParticipant || sendMessage.isPending}
               className="flex-1 text-base"
+              data-ocid="msg-input"
             />
             <Button
               type="submit"
@@ -955,6 +1136,7 @@ export default function ConversationPage() {
                 sendMessage.isPending
               }
               className="shrink-0"
+              data-ocid="msg-send-btn"
             >
               <Send className="h-4 w-4 sm:h-5 sm:w-5" />
             </Button>
@@ -969,14 +1151,12 @@ export default function ConversationPage() {
           onCancel={() => setShowVoiceRecorder(false)}
         />
       )}
-
       {showVideoRecorder && (
         <VideoRecorder
           onRecorded={handleVideoRecorded}
           onCancel={() => setShowVideoRecorder(false)}
         />
       )}
-
       {showRoseGift && otherParticipant && (
         <RoseGiftModal
           open={showRoseGift}
@@ -984,6 +1164,22 @@ export default function ConversationPage() {
           currentBalance={roseBalance || 0}
           onGift={handleRoseGift}
           onClose={() => setShowRoseGift(false)}
+        />
+      )}
+
+      {/* Forward Modal */}
+      {forwardingMessage && (
+        <ForwardMessageModal
+          open={!!forwardingMessage}
+          onClose={() => setForwardingMessage(null)}
+          onForward={(target) => {
+            if (forwardingMessage)
+              handleForwardMessage(forwardingMessage, target);
+          }}
+          conversations={
+            conversations?.filter((c) => c.id !== conversation?.id) ?? []
+          }
+          groups={groups}
         />
       )}
 

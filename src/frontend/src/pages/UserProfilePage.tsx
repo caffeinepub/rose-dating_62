@@ -17,15 +17,22 @@ import {
   Heart,
   MessageCircle,
   MessageSquare,
+  Pin,
   Send,
   Shield,
   ShieldOff,
-  Trash2,
   UserMinus,
   UserPlus,
 } from "lucide-react";
-import React, { useState, useCallback, useMemo } from "react";
-import type { CommentInteraction, Post } from "../backend";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
+import type { CommentInteraction, Post, Story } from "../backend";
+import { getMimeType } from "../lib/mimeTypes";
 
 const POSTS_PAGE_SIZE = 9;
 import { useInternetIdentity } from "../hooks/useInternetIdentity";
@@ -36,6 +43,7 @@ import {
   useFollowUser,
   useGetFollowerCount,
   useGetFollowingCount,
+  useGetPinnedStories,
   useGetPostComments,
   useGetPostInteractions,
   useGetUserPosts,
@@ -342,6 +350,187 @@ function CommentsModal({
   );
 }
 
+// Story viewer modal for Highlights
+function HighlightStoryModal({
+  story,
+  onClose,
+}: {
+  story: Story | null;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!story || story.content.__kind__ !== "video") return;
+    const video = videoRef.current;
+    if (!video) return;
+    // Clear stale source children before re-attaching
+    while (video.firstChild) video.removeChild(video.firstChild);
+    const src = story.content.video.getDirectURL();
+    const source = document.createElement("source");
+    source.src = src;
+    source.type = getMimeType(src);
+    video.appendChild(source);
+    video.load();
+    video.play().catch(() => {
+      /* autoplay may be blocked on some devices */
+    });
+  }, [story]);
+
+  if (!story) return null;
+
+  const renderContent = () => {
+    if (story.content.__kind__ === "image") {
+      return (
+        <img
+          src={story.content.image.getDirectURL()}
+          alt="Highlight"
+          className="max-w-full max-h-[75vh] object-contain mx-auto rounded-xl"
+        />
+      );
+    }
+    if (story.content.__kind__ === "video") {
+      return (
+        <video
+          ref={videoRef}
+          className="max-w-full max-h-[75vh] mx-auto rounded-xl"
+          controls
+          playsInline
+          muted
+          preload="metadata"
+        />
+      );
+    }
+    return null;
+  };
+
+  return (
+    <Dialog open={!!story} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg p-0 bg-black/95">
+        <div className="relative min-h-[300px] flex items-center justify-center p-8">
+          <button
+            type="button"
+            className="absolute top-2 right-2 z-10 text-white bg-white/20 hover:bg-white/30 rounded-full p-1 transition-colors"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            <svg
+              className="w-4 h-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+          {renderContent()}
+        </div>
+        <div className="px-4 pb-3 text-center text-xs text-white/60">
+          {new Date(Number(story.timestamp) / 1_000_000).toLocaleDateString(
+            [],
+            { month: "short", day: "numeric", year: "numeric" },
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Highlights section — horizontal row of pinned story thumbnails
+function HighlightsSection({ userId }: { userId: string }) {
+  const { data: pinnedStories, isLoading } = useGetPinnedStories(userId);
+  const [viewingStory, setViewingStory] = useState<Story | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-1.5">
+          <Pin className="w-4 h-4 text-rose-400" />
+          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            Highlights
+          </h3>
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {[...Array(3)].map((_, i) => (
+            <Skeleton
+              key={i}
+              className="w-16 h-16 rounded-full flex-shrink-0"
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (!pinnedStories || pinnedStories.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Pin className="w-4 h-4 text-rose-400" />
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          Highlights
+        </h3>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-2">
+        {pinnedStories.map((story) => {
+          const thumbUrl =
+            story.content.__kind__ === "image"
+              ? story.content.image.getDirectURL()
+              : story.content.__kind__ === "video"
+                ? story.content.video.getDirectURL()
+                : null;
+
+          return (
+            <button
+              key={story.id.toString()}
+              type="button"
+              className="flex flex-col items-center gap-1.5 flex-shrink-0 group"
+              onClick={() => setViewingStory(story)}
+              data-ocid="highlight-thumb"
+            >
+              <div className="p-0.5 rounded-full bg-gradient-to-tr from-rose-400 via-pink-500 to-rose-600">
+                <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-background bg-rose-100 flex items-center justify-center group-hover:opacity-90 transition-opacity">
+                  {thumbUrl && story.content.__kind__ === "image" ? (
+                    <img
+                      src={thumbUrl}
+                      alt="Highlight"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : story.content.__kind__ === "video" ? (
+                    <div className="w-full h-full bg-rose-200 flex items-center justify-center">
+                      <svg
+                        className="w-6 h-6 text-rose-500"
+                        fill="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </div>
+                  ) : (
+                    <Bookmark className="w-5 h-5 text-rose-400" />
+                  )}
+                </div>
+              </div>
+              <span className="text-xs text-muted-foreground max-w-[60px] truncate">
+                {new Date(
+                  Number(story.timestamp) / 1_000_000,
+                ).toLocaleDateString([], { month: "short", day: "numeric" })}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <HighlightStoryModal
+        story={viewingStory}
+        onClose={() => setViewingStory(null)}
+      />
+    </div>
+  );
+}
+
 export default function UserProfilePage() {
   // Route is /users/$userId as defined in App.tsx
   const { userId } = useParams({ from: "/users/$userId" });
@@ -549,6 +738,9 @@ export default function UserProfilePage() {
             </div>
           )}
         </div>
+
+        {/* Highlights */}
+        <HighlightsSection userId={userId} />
 
         {/* Posts */}
         <div className="space-y-4">

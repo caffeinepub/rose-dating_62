@@ -234,6 +234,8 @@ type Message =
  record {
    content: MessageType;
    id: nat;
+   isDeleted: bool;
+   isEdited: bool;
    receiver: principal;
    sender: principal;
    senderProfile: opt UserProfile;
@@ -244,6 +246,8 @@ type GroupMessage =
    content: MessageType;
    groupId: nat;
    id: nat;
+   isDeleted: bool;
+   isEdited: bool;
    sender: principal;
    senderProfile: opt UserProfile;
    timestamp: Time;
@@ -322,14 +326,46 @@ service : {
   createStory: (content: MessageType) -> (nat);
   deleteCallerProfile: () -> ();
   deleteComment: (postId: text, commentId: nat) -> ();
-  deleteMessage: (conversationId: nat, messageId: nat) -> ();
+  deleteGroupMessage: (groupId: nat, messageId: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
+  deleteMessage: (conversationId: nat, messageId: nat) ->
+   (variant {
+      err: text;
+      ok;
+    });
   deleteNotification: (notificationId: nat) -> ();
   deletePost: (postId: text) -> ();
-  editMessage: (conversationId: nat, messageId: nat, newContent:
-   MessageType) -> ();
+  editGroupMessage: (groupId: nat, messageId: nat, newText: text) ->
+   (variant {
+      err: text;
+      ok: GroupMessage;
+    });
+  editMessage: (conversationId: nat, messageId: nat, newText: text) ->
+   (variant {
+      err: text;
+      ok: Message;
+    });
   editPost: (postId: text, content: text, image: opt ExternalBlob) -> ();
   filterProfiles: (filter: ProfileFilter) -> (vec ProfileWithPrincipal) query;
   followUser: (targetUser: principal) -> ();
+  forwardGroupMessageToConversation: (sourceGroupId: nat, messageId: 
+   nat, targetConversationId: nat) -> (variant {
+                                         err: text;
+                                         ok: Message;
+                                       });
+  forwardMessage: (sourceConversationId: nat, messageId: nat,
+   targetConversationId: nat) -> (variant {
+                                    err: text;
+                                    ok: Message;
+                                  });
+  forwardMessageToGroup: (sourceConversationId: nat, messageId: nat,
+   targetGroupId: nat) -> (variant {
+                             err: text;
+                             ok: GroupMessage;
+                           });
   forwardPostToConversation: (postId: text, conversationId: nat) -> ();
   getActiveStories: () -> (vec Story) query;
   getAllBlockRecords: () -> (vec BlockRecord) query;
@@ -352,6 +388,7 @@ service : {
   getIcpUsdExchangeRate: () -> (float64);
   getNotificationCountByType: () -> (NotificationCount) query;
   getNotifications: () -> (vec Notification) query;
+  getPinnedStories: (userId: principal) -> (vec Story) query;
   getPinnedTrendingPost: () -> (opt Post) query;
   getPostComments: (postId: text) -> (vec CommentInteraction) query;
   getPostInteractions: (postId: text) ->
@@ -394,6 +431,10 @@ service : {
   markNotificationAsRead: (notificationId: nat) -> ();
   markStoryAsViewed: (storyId: nat) -> ();
   pinPostToTrending: (postId: text) -> ();
+  pinStory: (storyId: nat) -> (variant {
+                                 err: text;
+                                 ok;
+                               });
   removeGroupParticipant: (groupId: nat, participant: principal) -> ();
   requestBuyRoses: (amount: float64) -> (text);
   requestSellRoses: (amount: float64) -> (text);
@@ -409,6 +450,10 @@ service : {
   universalSearch: (searchTerm: text, maxResults: opt nat) ->
    (vec SearchResult) query;
   unlikePost: (postId: text) -> ();
+  unpinStory: (storyId: nat) -> (variant {
+                                   err: text;
+                                   ok;
+                                 });
   unpinTrendingPost: () -> ();
   unsavePost: (postId: text) -> ();
   updateGroupAvatar: (groupId: nat, newAvatar: opt ExternalBlob) -> ();

@@ -65,13 +65,6 @@ export const MessageType = IDL.Variant({
     'postId' : IDL.Text,
   }),
 });
-export const ProfileFilter = IDL.Record({
-  'country' : IDL.Opt(IDL.Text),
-  'minAge' : IDL.Opt(IDL.Nat),
-  'gender' : IDL.Opt(IDL.Text),
-  'maxAge' : IDL.Opt(IDL.Nat),
-  'minBalance' : IDL.Opt(IDL.Float64),
-});
 export const UserProfile = IDL.Record({
   'bio' : IDL.Opt(IDL.Text),
   'country' : IDL.Text,
@@ -80,6 +73,33 @@ export const UserProfile = IDL.Record({
   'name' : IDL.Text,
   'gender' : IDL.Opt(IDL.Text),
   'profilePicture' : IDL.Opt(ExternalBlob),
+});
+export const GroupMessage = IDL.Record({
+  'id' : IDL.Nat,
+  'isDeleted' : IDL.Bool,
+  'content' : MessageType,
+  'senderProfile' : IDL.Opt(UserProfile),
+  'sender' : IDL.Principal,
+  'groupId' : IDL.Nat,
+  'isEdited' : IDL.Bool,
+  'timestamp' : Time,
+});
+export const Message = IDL.Record({
+  'id' : IDL.Nat,
+  'isDeleted' : IDL.Bool,
+  'content' : MessageType,
+  'senderProfile' : IDL.Opt(UserProfile),
+  'sender' : IDL.Principal,
+  'isEdited' : IDL.Bool,
+  'timestamp' : Time,
+  'receiver' : IDL.Principal,
+});
+export const ProfileFilter = IDL.Record({
+  'country' : IDL.Opt(IDL.Text),
+  'minAge' : IDL.Opt(IDL.Nat),
+  'gender' : IDL.Opt(IDL.Text),
+  'maxAge' : IDL.Opt(IDL.Nat),
+  'minBalance' : IDL.Opt(IDL.Float64),
 });
 export const ProfileWithPrincipal = IDL.Record({
   'principal' : IDL.Principal,
@@ -133,14 +153,6 @@ export const Post = IDL.Record({
   'timestamp' : Time,
   'image' : IDL.Opt(ExternalBlob),
 });
-export const Message = IDL.Record({
-  'id' : IDL.Nat,
-  'content' : MessageType,
-  'senderProfile' : IDL.Opt(UserProfile),
-  'sender' : IDL.Principal,
-  'timestamp' : Time,
-  'receiver' : IDL.Principal,
-});
 export const Conversation = IDL.Record({
   'id' : IDL.Nat,
   'participants' : IDL.Vec(IDL.Principal),
@@ -155,14 +167,6 @@ export const GroupChat = IDL.Record({
   'createdAt' : Time,
   'admins' : IDL.Vec(IDL.Principal),
   'avatar' : IDL.Opt(ExternalBlob),
-});
-export const GroupMessage = IDL.Record({
-  'id' : IDL.Nat,
-  'content' : MessageType,
-  'senderProfile' : IDL.Opt(UserProfile),
-  'sender' : IDL.Principal,
-  'groupId' : IDL.Nat,
-  'timestamp' : Time,
 });
 export const NotificationCount = IDL.Record({
   'groupAddCount' : IDL.Nat,
@@ -324,10 +328,28 @@ export const idlService = IDL.Service({
   'createStory' : IDL.Func([MessageType], [IDL.Nat], []),
   'deleteCallerProfile' : IDL.Func([], [], []),
   'deleteComment' : IDL.Func([IDL.Text, IDL.Nat], [], []),
-  'deleteMessage' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
+  'deleteGroupMessage' : IDL.Func(
+      [IDL.Nat, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
+  'deleteMessage' : IDL.Func(
+      [IDL.Nat, IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'deleteNotification' : IDL.Func([IDL.Nat], [], []),
   'deletePost' : IDL.Func([IDL.Text], [], []),
-  'editMessage' : IDL.Func([IDL.Nat, IDL.Nat, MessageType], [], []),
+  'editGroupMessage' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Text],
+      [IDL.Variant({ 'ok' : GroupMessage, 'err' : IDL.Text })],
+      [],
+    ),
+  'editMessage' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Text],
+      [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
+      [],
+    ),
   'editPost' : IDL.Func([IDL.Text, IDL.Text, IDL.Opt(ExternalBlob)], [], []),
   'filterProfiles' : IDL.Func(
       [ProfileFilter],
@@ -335,6 +357,21 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'followUser' : IDL.Func([IDL.Principal], [], []),
+  'forwardGroupMessageToConversation' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Nat],
+      [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
+      [],
+    ),
+  'forwardMessage' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Nat],
+      [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
+      [],
+    ),
+  'forwardMessageToGroup' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Nat],
+      [IDL.Variant({ 'ok' : GroupMessage, 'err' : IDL.Text })],
+      [],
+    ),
   'forwardPostToConversation' : IDL.Func([IDL.Text, IDL.Nat], [], []),
   'getActiveStories' : IDL.Func([], [IDL.Vec(Story)], ['query']),
   'getAllBlockRecords' : IDL.Func([], [IDL.Vec(BlockRecord)], ['query']),
@@ -362,6 +399,7 @@ export const idlService = IDL.Service({
   'getIcpUsdExchangeRate' : IDL.Func([], [IDL.Float64], []),
   'getNotificationCountByType' : IDL.Func([], [NotificationCount], ['query']),
   'getNotifications' : IDL.Func([], [IDL.Vec(Notification)], ['query']),
+  'getPinnedStories' : IDL.Func([IDL.Principal], [IDL.Vec(Story)], ['query']),
   'getPinnedTrendingPost' : IDL.Func([], [IDL.Opt(Post)], ['query']),
   'getPostComments' : IDL.Func(
       [IDL.Text],
@@ -426,6 +464,11 @@ export const idlService = IDL.Service({
   'markNotificationAsRead' : IDL.Func([IDL.Nat], [], []),
   'markStoryAsViewed' : IDL.Func([IDL.Nat], [], []),
   'pinPostToTrending' : IDL.Func([IDL.Text], [], []),
+  'pinStory' : IDL.Func(
+      [IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'removeGroupParticipant' : IDL.Func([IDL.Nat, IDL.Principal], [], []),
   'requestBuyRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
   'requestSellRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
@@ -448,6 +491,11 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'unlikePost' : IDL.Func([IDL.Text], [], []),
+  'unpinStory' : IDL.Func(
+      [IDL.Nat],
+      [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+      [],
+    ),
   'unpinTrendingPost' : IDL.Func([], [], []),
   'unsavePost' : IDL.Func([IDL.Text], [], []),
   'updateGroupAvatar' : IDL.Func([IDL.Nat, IDL.Opt(ExternalBlob)], [], []),
@@ -514,13 +562,6 @@ export const idlFactory = ({ IDL }) => {
       'postId' : IDL.Text,
     }),
   });
-  const ProfileFilter = IDL.Record({
-    'country' : IDL.Opt(IDL.Text),
-    'minAge' : IDL.Opt(IDL.Nat),
-    'gender' : IDL.Opt(IDL.Text),
-    'maxAge' : IDL.Opt(IDL.Nat),
-    'minBalance' : IDL.Opt(IDL.Float64),
-  });
   const UserProfile = IDL.Record({
     'bio' : IDL.Opt(IDL.Text),
     'country' : IDL.Text,
@@ -529,6 +570,33 @@ export const idlFactory = ({ IDL }) => {
     'name' : IDL.Text,
     'gender' : IDL.Opt(IDL.Text),
     'profilePicture' : IDL.Opt(ExternalBlob),
+  });
+  const GroupMessage = IDL.Record({
+    'id' : IDL.Nat,
+    'isDeleted' : IDL.Bool,
+    'content' : MessageType,
+    'senderProfile' : IDL.Opt(UserProfile),
+    'sender' : IDL.Principal,
+    'groupId' : IDL.Nat,
+    'isEdited' : IDL.Bool,
+    'timestamp' : Time,
+  });
+  const Message = IDL.Record({
+    'id' : IDL.Nat,
+    'isDeleted' : IDL.Bool,
+    'content' : MessageType,
+    'senderProfile' : IDL.Opt(UserProfile),
+    'sender' : IDL.Principal,
+    'isEdited' : IDL.Bool,
+    'timestamp' : Time,
+    'receiver' : IDL.Principal,
+  });
+  const ProfileFilter = IDL.Record({
+    'country' : IDL.Opt(IDL.Text),
+    'minAge' : IDL.Opt(IDL.Nat),
+    'gender' : IDL.Opt(IDL.Text),
+    'maxAge' : IDL.Opt(IDL.Nat),
+    'minBalance' : IDL.Opt(IDL.Float64),
   });
   const ProfileWithPrincipal = IDL.Record({
     'principal' : IDL.Principal,
@@ -582,14 +650,6 @@ export const idlFactory = ({ IDL }) => {
     'timestamp' : Time,
     'image' : IDL.Opt(ExternalBlob),
   });
-  const Message = IDL.Record({
-    'id' : IDL.Nat,
-    'content' : MessageType,
-    'senderProfile' : IDL.Opt(UserProfile),
-    'sender' : IDL.Principal,
-    'timestamp' : Time,
-    'receiver' : IDL.Principal,
-  });
   const Conversation = IDL.Record({
     'id' : IDL.Nat,
     'participants' : IDL.Vec(IDL.Principal),
@@ -604,14 +664,6 @@ export const idlFactory = ({ IDL }) => {
     'createdAt' : Time,
     'admins' : IDL.Vec(IDL.Principal),
     'avatar' : IDL.Opt(ExternalBlob),
-  });
-  const GroupMessage = IDL.Record({
-    'id' : IDL.Nat,
-    'content' : MessageType,
-    'senderProfile' : IDL.Opt(UserProfile),
-    'sender' : IDL.Principal,
-    'groupId' : IDL.Nat,
-    'timestamp' : Time,
   });
   const NotificationCount = IDL.Record({
     'groupAddCount' : IDL.Nat,
@@ -770,10 +822,28 @@ export const idlFactory = ({ IDL }) => {
     'createStory' : IDL.Func([MessageType], [IDL.Nat], []),
     'deleteCallerProfile' : IDL.Func([], [], []),
     'deleteComment' : IDL.Func([IDL.Text, IDL.Nat], [], []),
-    'deleteMessage' : IDL.Func([IDL.Nat, IDL.Nat], [], []),
+    'deleteGroupMessage' : IDL.Func(
+        [IDL.Nat, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
+    'deleteMessage' : IDL.Func(
+        [IDL.Nat, IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'deleteNotification' : IDL.Func([IDL.Nat], [], []),
     'deletePost' : IDL.Func([IDL.Text], [], []),
-    'editMessage' : IDL.Func([IDL.Nat, IDL.Nat, MessageType], [], []),
+    'editGroupMessage' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Text],
+        [IDL.Variant({ 'ok' : GroupMessage, 'err' : IDL.Text })],
+        [],
+      ),
+    'editMessage' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Text],
+        [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
+        [],
+      ),
     'editPost' : IDL.Func([IDL.Text, IDL.Text, IDL.Opt(ExternalBlob)], [], []),
     'filterProfiles' : IDL.Func(
         [ProfileFilter],
@@ -781,6 +851,21 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'followUser' : IDL.Func([IDL.Principal], [], []),
+    'forwardGroupMessageToConversation' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Nat],
+        [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
+        [],
+      ),
+    'forwardMessage' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Nat],
+        [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
+        [],
+      ),
+    'forwardMessageToGroup' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Nat],
+        [IDL.Variant({ 'ok' : GroupMessage, 'err' : IDL.Text })],
+        [],
+      ),
     'forwardPostToConversation' : IDL.Func([IDL.Text, IDL.Nat], [], []),
     'getActiveStories' : IDL.Func([], [IDL.Vec(Story)], ['query']),
     'getAllBlockRecords' : IDL.Func([], [IDL.Vec(BlockRecord)], ['query']),
@@ -812,6 +897,7 @@ export const idlFactory = ({ IDL }) => {
     'getIcpUsdExchangeRate' : IDL.Func([], [IDL.Float64], []),
     'getNotificationCountByType' : IDL.Func([], [NotificationCount], ['query']),
     'getNotifications' : IDL.Func([], [IDL.Vec(Notification)], ['query']),
+    'getPinnedStories' : IDL.Func([IDL.Principal], [IDL.Vec(Story)], ['query']),
     'getPinnedTrendingPost' : IDL.Func([], [IDL.Opt(Post)], ['query']),
     'getPostComments' : IDL.Func(
         [IDL.Text],
@@ -876,6 +962,11 @@ export const idlFactory = ({ IDL }) => {
     'markNotificationAsRead' : IDL.Func([IDL.Nat], [], []),
     'markStoryAsViewed' : IDL.Func([IDL.Nat], [], []),
     'pinPostToTrending' : IDL.Func([IDL.Text], [], []),
+    'pinStory' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'removeGroupParticipant' : IDL.Func([IDL.Nat, IDL.Principal], [], []),
     'requestBuyRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
     'requestSellRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
@@ -898,6 +989,11 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'unlikePost' : IDL.Func([IDL.Text], [], []),
+    'unpinStory' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
+        [],
+      ),
     'unpinTrendingPost' : IDL.Func([], [], []),
     'unsavePost' : IDL.Func([IDL.Text], [], []),
     'updateGroupAvatar' : IDL.Func([IDL.Nat, IDL.Opt(ExternalBlob)], [], []),
