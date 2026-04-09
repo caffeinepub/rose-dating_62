@@ -117,6 +117,7 @@ export const Story = IDL.Record({
   'content' : MessageType,
   'expiresAt' : Time,
   'author' : IDL.Principal,
+  'viewCount' : IDL.Nat,
   'viewedBy' : IDL.Vec(IDL.Principal),
   'timestamp' : Time,
 });
@@ -155,7 +156,9 @@ export const AnalyticsSummary = IDL.Record({
 export const Post = IDL.Record({
   'id' : IDL.Text,
   'content' : IDL.Text,
+  'embed' : IDL.Opt(IDL.Text),
   'author' : IDL.Principal,
+  'viewCount' : IDL.Nat,
   'timestamp' : Time,
   'image' : IDL.Opt(ExternalBlob),
 });
@@ -330,7 +333,11 @@ export const idlService = IDL.Service({
       [IDL.Nat],
       [],
     ),
-  'createPost' : IDL.Func([IDL.Text, IDL.Opt(ExternalBlob)], [], []),
+  'createPost' : IDL.Func(
+      [IDL.Text, IDL.Opt(ExternalBlob), IDL.Opt(IDL.Text)],
+      [],
+      [],
+    ),
   'createStory' : IDL.Func([MessageType], [IDL.Nat], []),
   'deleteCallerProfile' : IDL.Func([], [], []),
   'deleteComment' : IDL.Func([IDL.Text, IDL.Nat], [], []),
@@ -356,7 +363,11 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
       [],
     ),
-  'editPost' : IDL.Func([IDL.Text, IDL.Text, IDL.Opt(ExternalBlob)], [], []),
+  'editPost' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Opt(ExternalBlob), IDL.Opt(IDL.Text)],
+      [],
+      [],
+    ),
   'filterProfiles' : IDL.Func(
       [ProfileFilter],
       [IDL.Vec(ProfileWithPrincipal)],
@@ -426,6 +437,7 @@ export const idlService = IDL.Service({
       ],
       ['query'],
     ),
+  'getPostViewCount' : IDL.Func([IDL.Text], [IDL.Nat], ['query']),
   'getPosts' : IDL.Func([], [IDL.Vec(Post)], ['query']),
   'getPostsFromFollowedUsers' : IDL.Func([], [IDL.Vec(Post)], ['query']),
   'getRoseBalance' : IDL.Func([], [IDL.Float64], ['query']),
@@ -495,6 +507,7 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
       [],
     ),
+  'recordPostView' : IDL.Func([IDL.Text], [], []),
   'removeGroupParticipant' : IDL.Func([IDL.Nat, IDL.Principal], [], []),
   'requestBuyRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
   'requestSellRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
@@ -648,6 +661,7 @@ export const idlFactory = ({ IDL }) => {
     'content' : MessageType,
     'expiresAt' : Time,
     'author' : IDL.Principal,
+    'viewCount' : IDL.Nat,
     'viewedBy' : IDL.Vec(IDL.Principal),
     'timestamp' : Time,
   });
@@ -686,7 +700,9 @@ export const idlFactory = ({ IDL }) => {
   const Post = IDL.Record({
     'id' : IDL.Text,
     'content' : IDL.Text,
+    'embed' : IDL.Opt(IDL.Text),
     'author' : IDL.Principal,
+    'viewCount' : IDL.Nat,
     'timestamp' : Time,
     'image' : IDL.Opt(ExternalBlob),
   });
@@ -858,7 +874,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Nat],
         [],
       ),
-    'createPost' : IDL.Func([IDL.Text, IDL.Opt(ExternalBlob)], [], []),
+    'createPost' : IDL.Func(
+        [IDL.Text, IDL.Opt(ExternalBlob), IDL.Opt(IDL.Text)],
+        [],
+        [],
+      ),
     'createStory' : IDL.Func([MessageType], [IDL.Nat], []),
     'deleteCallerProfile' : IDL.Func([], [], []),
     'deleteComment' : IDL.Func([IDL.Text, IDL.Nat], [], []),
@@ -884,7 +904,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : Message, 'err' : IDL.Text })],
         [],
       ),
-    'editPost' : IDL.Func([IDL.Text, IDL.Text, IDL.Opt(ExternalBlob)], [], []),
+    'editPost' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Opt(ExternalBlob), IDL.Opt(IDL.Text)],
+        [],
+        [],
+      ),
     'filterProfiles' : IDL.Func(
         [ProfileFilter],
         [IDL.Vec(ProfileWithPrincipal)],
@@ -958,6 +982,7 @@ export const idlFactory = ({ IDL }) => {
         ],
         ['query'],
       ),
+    'getPostViewCount' : IDL.Func([IDL.Text], [IDL.Nat], ['query']),
     'getPosts' : IDL.Func([], [IDL.Vec(Post)], ['query']),
     'getPostsFromFollowedUsers' : IDL.Func([], [IDL.Vec(Post)], ['query']),
     'getRoseBalance' : IDL.Func([], [IDL.Float64], ['query']),
@@ -1027,6 +1052,7 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : IDL.Null, 'err' : IDL.Text })],
         [],
       ),
+    'recordPostView' : IDL.Func([IDL.Text], [], []),
     'removeGroupParticipant' : IDL.Func([IDL.Nat, IDL.Principal], [], []),
     'requestBuyRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),
     'requestSellRoses' : IDL.Func([IDL.Float64], [IDL.Text], []),

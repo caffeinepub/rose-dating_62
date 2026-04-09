@@ -430,7 +430,6 @@ function ParticipantRow({
   canManage,
   onRemove,
   onNavigate,
-  searchQuery,
 }: {
   principal: string;
   isAdmin: boolean;
@@ -439,16 +438,8 @@ function ParticipantRow({
   canManage: boolean;
   onRemove: () => void;
   onNavigate: () => void;
-  searchQuery?: string;
 }) {
   const { data: profile } = useGetUserProfile(principal);
-
-  if (searchQuery?.trim()) {
-    const q = searchQuery.toLowerCase();
-    const name = (profile?.name ?? "").toLowerCase();
-    const username = (profile?.username ?? "").toLowerCase();
-    if (!name.includes(q) && !username.includes(q)) return null;
-  }
 
   return (
     <div className="flex items-center gap-3 py-2 px-1">
@@ -708,7 +699,6 @@ export default function GroupChatPage() {
   const [showVideoRecorder, setShowVideoRecorder] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
-  const [memberSearch, setMemberSearch] = useState("");
   const [visibleMembers, setVisibleMembers] = useState(MEMBERS_PAGE_SIZE);
   const [videoSending, setVideoSending] = useState(false);
   // Edit/delete/forward state
@@ -734,11 +724,6 @@ export default function GroupChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: memberSearch is intentionally watched to reset pagination
-  useEffect(() => {
-    setVisibleMembers(MEMBERS_PAGE_SIZE);
-  }, [memberSearch]);
 
   // Mark incoming messages as read when group chat loads
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally run only on groupId change
@@ -770,8 +755,12 @@ export default function GroupChatPage() {
     group?.admins.some((a) => a.toString() === currentPrincipal) ?? false;
   const isCreator = group?.creator.toString() === currentPrincipal;
   const allParticipants = group?.participants || [];
-  const visibleParticipants = allParticipants.slice(0, visibleMembers);
-  const hasMoreMembers = allParticipants.length > visibleMembers;
+  // sortedAllParticipants: sort by principal string (a stable sort proxy before profiles load)
+  const sortedAllParticipants = [...allParticipants].sort((a, b) =>
+    a.toString().localeCompare(b.toString()),
+  );
+  const visibleParticipants = sortedAllParticipants.slice(0, visibleMembers);
+  const hasMoreMembers = sortedAllParticipants.length > visibleMembers;
 
   const availableContacts = useMemo<Contact[]>(() => {
     const groupParticipantSet = new Set(
@@ -1565,30 +1554,8 @@ export default function GroupChatPage() {
                   Members
                 </h4>
                 <span className="text-xs text-muted-foreground">
-                  ({group.participants.length})
+                  ({sortedAllParticipants.length})
                 </span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-lg mb-3">
-                <Search
-                  size={14}
-                  className="text-muted-foreground flex-shrink-0"
-                />
-                <input
-                  type="text"
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder="Search members..."
-                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  data-ocid="group-member-search"
-                />
-                {memberSearch && (
-                  <button
-                    onClick={() => setMemberSearch("")}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X size={12} />
-                  </button>
-                )}
               </div>
               <div className="divide-y divide-border/50">
                 {visibleParticipants.map((participant) => {
@@ -1601,7 +1568,6 @@ export default function GroupChatPage() {
                       isCreator={group.creator.toString() === pStr}
                       isCurrentUser={pStr === currentPrincipal}
                       canManage={isAdmin}
-                      searchQuery={memberSearch}
                       onRemove={() => handleRemoveParticipant(pStr)}
                       onNavigate={() =>
                         navigate({
@@ -1621,7 +1587,7 @@ export default function GroupChatPage() {
                   className="w-full mt-3 flex items-center justify-center gap-1 py-2 text-sm text-primary hover:text-primary/80 transition-colors"
                 >
                   <ChevronDown size={14} />
-                  Show more ({allParticipants.length - visibleMembers}{" "}
+                  Show more ({sortedAllParticipants.length - visibleMembers}{" "}
                   remaining)
                 </button>
               )}

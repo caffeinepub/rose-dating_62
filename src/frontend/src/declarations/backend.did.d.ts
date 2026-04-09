@@ -133,7 +133,9 @@ export type NotificationType = { 'postGift' : null } |
 export interface Post {
   'id' : string,
   'content' : string,
+  'embed' : [] | [string],
   'author' : Principal,
+  'viewCount' : bigint,
   'timestamp' : Time,
   'image' : [] | [ExternalBlob],
 }
@@ -214,6 +216,7 @@ export interface Story {
   'content' : MessageType,
   'expiresAt' : Time,
   'author' : Principal,
+  'viewCount' : bigint,
   'viewedBy' : Array<Principal>,
   'timestamp' : Time,
 }
@@ -309,7 +312,10 @@ export interface _SERVICE {
     [string, Array<Principal>, [] | [ExternalBlob]],
     bigint
   >,
-  'createPost' : ActorMethod<[string, [] | [ExternalBlob]], undefined>,
+  'createPost' : ActorMethod<
+    [string, [] | [ExternalBlob], [] | [string]],
+    undefined
+  >,
   'createStory' : ActorMethod<[MessageType], bigint>,
   'deleteCallerProfile' : ActorMethod<[], undefined>,
   'deleteComment' : ActorMethod<[string, bigint], undefined>,
@@ -335,7 +341,10 @@ export interface _SERVICE {
     { 'ok' : Message } |
       { 'err' : string }
   >,
-  'editPost' : ActorMethod<[string, string, [] | [ExternalBlob]], undefined>,
+  'editPost' : ActorMethod<
+    [string, string, [] | [ExternalBlob], [] | [string]],
+    undefined
+  >,
   'filterProfiles' : ActorMethod<[ProfileFilter], Array<ProfileWithPrincipal>>,
   'followUser' : ActorMethod<[Principal], undefined>,
   'forwardGroupMessageToConversation' : ActorMethod<
@@ -386,6 +395,7 @@ export interface _SERVICE {
       'roseGifts' : bigint,
     }
   >,
+  'getPostViewCount' : ActorMethod<[string], bigint>,
   'getPosts' : ActorMethod<[], Array<Post>>,
   'getPostsFromFollowedUsers' : ActorMethod<[], Array<Post>>,
   'getRoseBalance' : ActorMethod<[], number>,
@@ -440,6 +450,7 @@ export interface _SERVICE {
     { 'ok' : null } |
       { 'err' : string }
   >,
+  'recordPostView' : ActorMethod<[string], undefined>,
   'removeGroupParticipant' : ActorMethod<[bigint, Principal], undefined>,
   'requestBuyRoses' : ActorMethod<[number], string>,
   'requestSellRoses' : ActorMethod<[number], string>,

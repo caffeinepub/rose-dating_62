@@ -124,7 +124,9 @@ export interface TransformationInput {
 export interface Post {
     id: string;
     content: string;
+    embed?: string;
     author: Principal;
+    viewCount: bigint;
     timestamp: Time;
     image?: ExternalBlob;
 }
@@ -149,6 +151,7 @@ export interface Story {
     content: MessageType;
     expiresAt: Time;
     author: Principal;
+    viewCount: bigint;
     viewedBy: Array<Principal>;
     timestamp: Time;
 }
@@ -311,7 +314,7 @@ export interface backendInterface {
     convertBalanceToUsdQuery(amount: number): Promise<number>;
     createCheckoutSession(items: Array<ShoppingItem>, successUrl: string, cancelUrl: string): Promise<string>;
     createGroupChat(name: string, initialParticipants: Array<Principal>, avatar: ExternalBlob | null): Promise<bigint>;
-    createPost(content: string, image: ExternalBlob | null): Promise<void>;
+    createPost(content: string, image: ExternalBlob | null, embed: string | null): Promise<void>;
     createStory(content: MessageType): Promise<bigint>;
     deleteCallerProfile(): Promise<void>;
     deleteComment(postId: string, commentId: bigint): Promise<void>;
@@ -345,7 +348,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
-    editPost(postId: string, content: string, image: ExternalBlob | null): Promise<void>;
+    editPost(postId: string, content: string, image: ExternalBlob | null, embed: string | null): Promise<void>;
     filterProfiles(filter: ProfileFilter): Promise<Array<ProfileWithPrincipal>>;
     followUser(targetUser: Principal): Promise<void>;
     forwardGroupMessageToConversation(sourceGroupId: bigint, messageId: bigint, targetConversationId: bigint): Promise<{
@@ -399,6 +402,7 @@ export interface backendInterface {
         comments: bigint;
         roseGifts: bigint;
     }>;
+    getPostViewCount(postId: string): Promise<bigint>;
     getPosts(): Promise<Array<Post>>;
     getPostsFromFollowedUsers(): Promise<Array<Post>>;
     getRoseBalance(): Promise<number>;
@@ -466,6 +470,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    recordPostView(postId: string): Promise<void>;
     removeGroupParticipant(groupId: bigint, participant: Principal): Promise<void>;
     requestBuyRoses(amount: number): Promise<string>;
     requestSellRoses(amount: number): Promise<string>;

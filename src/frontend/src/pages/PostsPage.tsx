@@ -14,7 +14,9 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   Bookmark,
   ChevronDown,
+  Code2,
   Edit3,
+  Eye,
   Heart,
   Image as ImageIcon,
   Loader2,
@@ -24,6 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type React from "react";
 import { useEffect, useRef, useState } from "react";
 import type { CommentInteraction, Post } from "../backend";
 import { ExternalBlob } from "../backend";
@@ -50,6 +53,127 @@ import {
 } from "../hooks/useQueries";
 
 const PAGE_SIZE = 12;
+
+// ─── Embed helpers ────────────────────────────────────────────────────────────
+const EMBED_PREFIX = "[embed:";
+const EMBED_SUFFIX = "]";
+
+function encodeEmbed(url: string): string {
+  return `${EMBED_PREFIX}${url}${EMBED_SUFFIX}`;
+}
+
+function parseEmbed(content: string): {
+  text: string;
+  embedUrl: string | null;
+} {
+  const startIdx = content.indexOf(EMBED_PREFIX);
+  if (startIdx === -1) return { text: content, embedUrl: null };
+  const endIdx = content.indexOf(EMBED_SUFFIX, startIdx + EMBED_PREFIX.length);
+  if (endIdx === -1) return { text: content, embedUrl: null };
+  const embedUrl = content.slice(startIdx + EMBED_PREFIX.length, endIdx);
+  const text = content.slice(0, startIdx).trim();
+  return { text, embedUrl };
+}
+
+function extractEmbedSrcFromCode(embedCode: string): string | null {
+  // Try to extract src from <iframe src="..."> or <blockquote data-...>
+  const srcMatch = embedCode.match(/src=["']([^"']+)["']/i);
+  if (srcMatch) return srcMatch[1];
+  // For X/Twitter blockquotes: extract the tweet URL
+  const hrefMatch = embedCode.match(
+    /href=["'](https:\/\/(?:twitter|x)\.com\/[^"'?]+)["']/i,
+  );
+  if (hrefMatch) return hrefMatch[1];
+  return null;
+}
+
+function detectEmbedType(url: string): "youtube" | "x" | "tiktok" | "unknown" {
+  if (
+    url.includes("youtube.com") ||
+    url.includes("youtu.be") ||
+    url.includes("youtube-nocookie.com")
+  )
+    return "youtube";
+  if (
+    url.includes("twitter.com") ||
+    url.includes("x.com") ||
+    url.includes("twttr.com")
+  )
+    return "x";
+  if (url.includes("tiktok.com")) return "tiktok";
+  return "unknown";
+}
+
+// ─── Embed Renderer ───────────────────────────────────────────────────────────
+function EmbedRenderer({ embedUrl }: { embedUrl: string }) {
+  const type = detectEmbedType(embedUrl);
+
+  if (type === "x") {
+    // X/Twitter — link card style since iframes are restricted
+    return (
+      <a
+        href={embedUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-3 p-3 rounded-xl border border-border bg-muted/40 hover:bg-muted/70 transition-colors mt-2 mb-1 group"
+        data-ocid="post-embed-x"
+      >
+        <div className="w-8 h-8 rounded-full bg-black flex items-center justify-center flex-shrink-0">
+          <svg
+            className="w-4 h-4 text-white"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.74l7.73-8.835L1.254 2.25H8.08l4.259 5.63 5.905-5.63zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-foreground">
+            View on X (Twitter)
+          </p>
+          <p className="text-xs text-muted-foreground truncate">{embedUrl}</p>
+        </div>
+        <svg
+          className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+          />
+        </svg>
+      </a>
+    );
+  }
+
+  const isTikTok = type === "tiktok";
+  const height = isTikTok ? "560px" : "315px";
+
+  return (
+    <div
+      className="mt-2 mb-1 rounded-xl overflow-hidden w-full"
+      style={{ height }}
+    >
+      <iframe
+        src={embedUrl}
+        width="100%"
+        height={height}
+        className="rounded-xl border-0 w-full"
+        allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+        allowFullScreen
+        loading="lazy"
+        title="Embedded content"
+        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+        data-ocid="post-embed-iframe"
+      />
+    </div>
+  );
+}
 
 // ─── Post Author Avatar ───────────────────────────────────────────────────────
 function PostAuthorAvatar({ authorId }: { authorId: string }) {
@@ -146,13 +270,9 @@ function PostInteractionsBar({
   const { identity } = useInternetIdentity();
   const { data: savedPosts } = useGetSavedPosts();
 
-  // Initialize liked/saved from available server data
-  // Note: backend doesn't expose a per-post liked state, so liked starts false
-  // Saved state is derived from the saved posts list
   const [liked, setLiked] = useState(false);
   const [saved, setSaved] = useState(() => false);
 
-  // Sync saved state from the saved posts list once loaded
   useEffect(() => {
     if (savedPosts) {
       setSaved(savedPosts.some((p) => p.id === post.id));
@@ -180,6 +300,8 @@ function PostInteractionsBar({
       await savePost.mutateAsync(post.id);
     }
   };
+
+  const viewCount = interactions ? Number(interactions.forwards) : 0;
 
   return (
     <div className="flex items-center gap-4 pt-2 border-t border-border/40">
@@ -212,6 +334,15 @@ function PostInteractionsBar({
         <Bookmark className={`w-4 h-4 ${saved ? "fill-amber-500" : ""}`} />
         <span>{isLoading ? "…" : Number(interactions?.saves ?? 0)}</span>
       </button>
+
+      {/* View count */}
+      <span
+        className="flex items-center gap-1 text-xs text-muted-foreground ml-auto"
+        data-ocid="post-view-count"
+      >
+        <Eye className="w-3.5 h-3.5" />
+        <span>{isLoading ? "…" : viewCount}</span>
+      </span>
     </div>
   );
 }
@@ -338,6 +469,9 @@ function PostCard({
 
   const imageUrl = post.image ? post.image.getDirectURL() : null;
 
+  // Parse embed from content
+  const { text: postText, embedUrl } = parseEmbed(post.content);
+
   const handleDelete = async () => {
     await deletePost.mutateAsync(post.id);
   };
@@ -429,9 +563,15 @@ function PostCard({
           </div>
         </div>
       ) : (
-        <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap">
-          {post.content}
-        </p>
+        <>
+          {postText && (
+            <p className="text-sm leading-relaxed mb-3 whitespace-pre-wrap">
+              {postText}
+            </p>
+          )}
+          {/* Embed */}
+          {embedUrl && <EmbedRenderer embedUrl={embedUrl} />}
+        </>
       )}
 
       {/* Image */}
@@ -467,9 +607,24 @@ function CreatePostForm() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [showEmbedInput, setShowEmbedInput] = useState(false);
+  const [embedCode, setEmbedCode] = useState("");
+  const [embedUrl, setEmbedUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const createPost = useCreatePost();
   const { data: profile } = useGetCallerUserProfile();
+
+  const handleEmbedCodeChange = (code: string) => {
+    setEmbedCode(code);
+    const extracted = extractEmbedSrcFromCode(code);
+    setEmbedUrl(extracted);
+  };
+
+  const handleRemoveEmbed = () => {
+    setEmbedCode("");
+    setEmbedUrl(null);
+    setShowEmbedInput(false);
+  };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -481,7 +636,8 @@ function CreatePostForm() {
   };
 
   const handleSubmit = async () => {
-    if (!content.trim() && !imageFile) return;
+    const hasContent = content.trim() || imageFile || embedUrl;
+    if (!hasContent) return;
     setUploading(true);
     try {
       let imageBlob: ExternalBlob | null = null;
@@ -489,13 +645,20 @@ function CreatePostForm() {
         const bytes = new Uint8Array(await imageFile.arrayBuffer());
         imageBlob = ExternalBlob.fromBytes(bytes);
       }
+      // Encode embed URL into content using our prefix format
+      const finalContent = embedUrl
+        ? `${content.trim()}${content.trim() ? "\n" : ""}${encodeEmbed(embedUrl)}`
+        : content.trim();
       await createPost.mutateAsync({
-        content: content.trim(),
+        content: finalContent,
         image: imageBlob,
       });
       setContent("");
       setImageFile(null);
       setImagePreview(null);
+      setEmbedCode("");
+      setEmbedUrl(null);
+      setShowEmbedInput(false);
     } finally {
       setUploading(false);
     }
@@ -504,6 +667,18 @@ function CreatePostForm() {
   const avatarUrl = profile?.profilePicture
     ? profile.profilePicture.getDirectURL()
     : null;
+
+  const embedType = embedUrl ? detectEmbedType(embedUrl) : null;
+  const embedTypeLabel =
+    embedType === "youtube"
+      ? "YouTube"
+      : embedType === "x"
+        ? "X (Twitter)"
+        : embedType === "tiktok"
+          ? "TikTok"
+          : embedUrl
+            ? "Embed"
+            : null;
 
   return (
     <div className="bg-card border border-border/50 rounded-2xl p-4 shadow-sm">
@@ -521,6 +696,46 @@ function CreatePostForm() {
             placeholder="Share something with the community…"
             className="min-h-[80px] resize-none border-border/50 focus:border-primary/50"
           />
+
+          {/* Embed input panel */}
+          {showEmbedInput && (
+            <div className="space-y-2 p-3 bg-muted/40 rounded-xl border border-border/50">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-foreground">
+                  Paste YouTube, X, or TikTok embed code
+                </span>
+                <button
+                  type="button"
+                  onClick={handleRemoveEmbed}
+                  className="text-muted-foreground hover:text-destructive transition-colors"
+                  aria-label="Remove embed"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <Textarea
+                value={embedCode}
+                onChange={(e) => handleEmbedCodeChange(e.target.value)}
+                placeholder='Paste embed code here, e.g. <iframe src="...">'
+                className="min-h-[70px] resize-none text-xs font-mono border-border/50"
+                data-ocid="embed-code-input"
+              />
+              {embedUrl && embedTypeLabel && (
+                <div className="flex items-center gap-2 text-xs text-primary">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  <span>{embedTypeLabel} embed detected</span>
+                </div>
+              )}
+              {embedCode && !embedUrl && (
+                <p className="text-xs text-destructive">
+                  Could not extract embed URL. Make sure you paste the full
+                  embed code.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Image preview */}
           {imagePreview && (
             <div className="relative inline-block">
               <img
@@ -539,14 +754,30 @@ function CreatePostForm() {
               </button>
             </div>
           )}
+
           <div className="flex items-center justify-between">
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
-            >
-              <ImageIcon className="w-4 h-4" />
-              <span>Add photo</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>Photo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowEmbedInput((v) => !v)}
+                className={`flex items-center gap-1.5 text-xs transition-colors ${
+                  showEmbedInput
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-primary"
+                }`}
+                data-ocid="embed-toggle-btn"
+              >
+                <Code2 className="w-4 h-4" />
+                <span>Embed</span>
+              </button>
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -558,7 +789,7 @@ function CreatePostForm() {
               size="sm"
               onClick={handleSubmit}
               disabled={
-                (!content.trim() && !imageFile) ||
+                (!content.trim() && !imageFile && !embedUrl) ||
                 uploading ||
                 createPost.isPending
               }

@@ -350,9 +350,10 @@ export function useCreatePost() {
     mutationFn: async ({
       content,
       image,
-    }: { content: string; image: any | null }) => {
+      embed,
+    }: { content: string; image: any | null; embed?: string | null }) => {
       if (!actor) throw new Error("Actor not available");
-      await actor.createPost(content, image);
+      await actor.createPost(content, image, embed ?? null);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["posts"] });
@@ -371,9 +372,15 @@ export function useEditPost() {
       postId,
       content,
       image,
-    }: { postId: string; content: string; image: any | null }) => {
+      embed,
+    }: {
+      postId: string;
+      content: string;
+      image: any | null;
+      embed?: string | null;
+    }) => {
       if (!actor) throw new Error("Actor not available");
-      await actor.editPost(postId, content, image);
+      await actor.editPost(postId, content, image, embed ?? null);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["posts"] });

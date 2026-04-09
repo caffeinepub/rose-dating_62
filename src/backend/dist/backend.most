@@ -19,6 +19,7 @@ type Conversation__183739819 =
   };
 type Data__791452850<K, V> =
   {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type ExternalBlob__169550538 = Blob;
 type ExternalBlob__246066408 = Blob;
 type ForwardInteraction__375193206 =
   {
@@ -79,6 +80,25 @@ type MessageType__269899696 =
     #video : ExternalBlob__246066408;
     #voice : ExternalBlob__246066408
   };
+type MessageType__709706058 =
+  {
+    #forwardedPost :
+      {
+        author : Principal;
+        contentSnippet : Text;
+        image : ?ExternalBlob__169550538;
+        postId : Text;
+        timestamp : Time__561899388
+      };
+    #image : ExternalBlob__169550538;
+    #media : ExternalBlob__169550538;
+    #receipt : ReceiptMessage__369664389;
+    #rose : Float;
+    #text : Text;
+    #tradeRequest : TradeRequestMessage__629269408;
+    #video : ExternalBlob__169550538;
+    #voice : ExternalBlob__169550538
+  };
 type Message__19119041 =
   {
     content : MessageType__269899696;
@@ -123,88 +143,32 @@ type Notification__879889657 =
     timestamp : Time__38388344;
     userId : Principal
   };
-type OldConversation__937823799 =
+type PostV1__1020748959 =
   {
-    id : Nat;
-    messages : [OldMessage__897832057];
-    otherParticipantProfile : ?OldUserProfile__416069324;
-    participants : [Principal]
+    author : Principal;
+    content : Text;
+    id : Text;
+    image : ?ExternalBlob__169550538;
+    timestamp : Time__561899388
   };
-type OldGroupMessage__940783339 =
+type Post__955439577 =
   {
-    content : OldMessageType__519610819;
-    groupId : Nat;
-    id : Nat;
-    isDeleted : Bool;
-    isEdited : Bool;
-    sender : Principal;
-    senderProfile : ?OldUserProfile__416069324;
-    timestamp : Time__976142243
+    author : Principal;
+    content : Text;
+    embed : ?Text;
+    id : Text;
+    image : ?ExternalBlob__246066408;
+    timestamp : Time__38388344;
+    viewCount : Nat
   };
-type OldMessageType__519610819 =
-  {
-    #forwardedPost :
-      {
-        author : Principal;
-        contentSnippet : Text;
-        image : ?ExternalBlob__246066408;
-        postId : Text;
-        timestamp : Time__976142243
-      };
-    #image : ExternalBlob__246066408;
-    #media : ExternalBlob__246066408;
-    #receipt : OldReceiptMessage__881183049;
-    #rose : Float;
-    #text : Text;
-    #tradeRequest : OldTradeRequestMessage__107377972;
-    #video : ExternalBlob__246066408;
-    #voice : ExternalBlob__246066408
-  };
-type OldMessage__897832057 =
-  {
-    content : OldMessageType__519610819;
-    id : Nat;
-    isDeleted : Bool;
-    isEdited : Bool;
-    receiver : Principal;
-    sender : Principal;
-    senderProfile : ?OldUserProfile__416069324;
-    timestamp : Time__976142243
-  };
-type OldReceiptMessage__881183049 =
+type ReceiptMessage__369664389 =
   {
     amount : Float;
     fee : Float;
     receiver : Principal;
     sender : Principal;
     summary : Text;
-    timestamp : Time__976142243
-  };
-type OldTradeRequestMessage__107377972 =
-  {
-    amount : Float;
-    requestType : Text;
-    requester : Principal;
-    summary : Text;
-    timestamp : Time__976142243
-  };
-type OldUserProfile__416069324 =
-  {
-    bio : ?Text;
-    birthYear : ?Nat;
-    country : Text;
-    gender : ?Text;
-    name : Text;
-    profilePicture : ?ExternalBlob__246066408;
-    username : Text
-  };
-type Post__955439577 =
-  {
-    author : Principal;
-    content : Text;
-    id : Text;
-    image : ?ExternalBlob__246066408;
-    timestamp : Time__38388344
+    timestamp : Time__561899388
   };
 type ReceiptMessage__605898364 =
   {
@@ -236,6 +200,15 @@ type RoseTransaction__310589703 =
   };
 type SaveInteraction__964499543 =
   {postId : Text; timestamp : Time__38388344; user : Principal};
+type StoryV1__55497482 =
+  {
+    author : Principal;
+    content : MessageType__709706058;
+    expiresAt : Time__561899388;
+    id : Nat;
+    timestamp : Time__561899388;
+    viewedBy : [Principal]
+  };
 type Story__270542992 =
   {
     author : Principal;
@@ -243,12 +216,21 @@ type Story__270542992 =
     expiresAt : Time__38388344;
     id : Nat;
     timestamp : Time__38388344;
+    viewCount : Nat;
     viewedBy : [Principal]
   };
 type StripeConfiguration__96897619 =
   {allowedCountries : [Text]; secretKey : Text};
 type Time__38388344 = Int;
-type Time__976142243 = Int;
+type Time__561899388 = Int;
+type TradeRequestMessage__629269408 =
+  {
+    amount : Float;
+    requestType : Text;
+    requester : Principal;
+    summary : Text;
+    timestamp : Time__561899388
+  };
 type TradeRequestMessage__809530092 =
   {
     amount : Float;
@@ -286,7 +268,11 @@ actor ({
       var root : Node__46230540<Text, [CommentInteraction__393041]>;
       var size : Nat__490723111
     };
-  in var conversations : Map__605269027<Nat, OldConversation__937823799>;
+  stable var conversations :
+    {
+      var root : Node__46230540<Nat, Conversation__183739819>;
+      var size : Nat__490723111
+    };
   stable exchangeRateUpdateInterval : Int;
   stable var followersMap :
     {
@@ -308,7 +294,11 @@ actor ({
       var root : Node__46230540<Nat, GroupChat__82569430>;
       var size : Nat__490723111
     };
-  in var groupMessages : Map__605269027<Nat, [OldGroupMessage__940783339]>;
+  stable var groupMessages :
+    {
+      var root : Node__46230540<Nat, [GroupMessage__423684362]>;
+      var size : Nat__490723111
+    };
   stable var icpUsdExchangeRate : ?Float;
   stable var lastExchangeRateUpdate : ?Time__38388344;
   stable var likesMap :
@@ -337,11 +327,9 @@ actor ({
       var root : Node__46230540<Text, [RoseGiftOnPost__931872855]>;
       var size : Nat__490723111
     };
-  stable var posts :
-    {
-      var root : Node__46230540<Text, Post__955439577>;
-      var size : Nat__490723111
-    };
+  stable var postViewersMap :
+    {var root : Node__46230540<Text, [Principal]>; var size : Nat__490723111};
+  in var posts : Map__605269027<Text, PostV1__1020748959>;
   stable var roseBalances :
     {var root : Node__46230540<Principal, Float>; var size : Nat__490723111};
   stable var roseTransactions : [RoseTransaction__310589703];
@@ -350,11 +338,7 @@ actor ({
       var root : Node__46230540<Text, [SaveInteraction__964499543]>;
       var size : Nat__490723111
     };
-  stable var stories :
-    {
-      var root : Node__46230540<Nat, Story__270542992>;
-      var size : Nat__490723111
-    };
+  in var stories : Map__605269027<Nat, StoryV1__55497482>;
   stable storyDuration : Int;
   stable var stripeConfig : ?StripeConfiguration__96897619;
   stable var totalCirculatingRoses : Float;
@@ -445,11 +429,8 @@ actor ({
       var root : Node__46230540<Text, [RoseGiftOnPost__931872855]>;
       var size : Nat__490723111
     };
-  stable var posts :
-    {
-      var root : Node__46230540<Text, Post__955439577>;
-      var size : Nat__490723111
-    };
+  stable var postViewersMap :
+    {var root : Node__46230540<Text, [Principal]>; var size : Nat__490723111};
   stable var roseBalances :
     {var root : Node__46230540<Principal, Float>; var size : Nat__490723111};
   stable var roseTransactions : [RoseTransaction__310589703];
@@ -458,11 +439,8 @@ actor ({
       var root : Node__46230540<Text, [SaveInteraction__964499543]>;
       var size : Nat__490723111
     };
-  stable var stories :
-    {
-      var root : Node__46230540<Nat, Story__270542992>;
-      var size : Nat__490723111
-    };
+  stable var stablePostsV2 : [(Text, Post__955439577)];
+  stable var stableStoriesV2 : [(Nat, Story__270542992)];
   stable storyDuration : Int;
   stable var stripeConfig : ?StripeConfiguration__96897619;
   stable var totalCirculatingRoses : Float;

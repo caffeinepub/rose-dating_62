@@ -15,10 +15,13 @@ import Int "mo:core/Int";
 import Debug "mo:base/Debug";
 import Buffer "mo:base/Buffer";
 import Runtime "mo:core/Runtime";
-import Migration "migration";
+import Iter "mo:core/Iter";
+import { migration } "RoseMigration";
 
 
-(with migration = Migration.run)
+
+
+(with migration)
 actor {
   // Authorization
   let accessControlState = AccessControl.initState();
@@ -432,7 +435,9 @@ actor {
   };
 
   // Story System
-  public type Story = {
+
+  // StoryV1 – stable type from previous deployment (no viewCount)
+  type StoryV1 = {
     id : Nat;
     author : Principal;
     content : MessageType;
@@ -441,8 +446,21 @@ actor {
     viewedBy : [Principal];
   };
 
+  public type Story = {
+    id : Nat;
+    author : Principal;
+    content : MessageType;
+    timestamp : Time.Time;
+    expiresAt : Time.Time;
+    viewedBy : [Principal];
+    viewCount : Nat;
+  };
+
+  // Stable arrays used as primary persistent storage for stories
+  var stableStoriesV2 : [(Nat, Story)] = [];
+
   var nextStoryId = 0;
-  var stories = Map.empty<Nat, Story>();
+  transient var stories = Map.empty<Nat, Story>();
   var userStories = Map.empty<Principal, [Nat]>();
   // Pinned/highlighted stories per user: storyId stays permanently until unpinned
   var pinnedStories = Map.empty<Principal, [Nat]>();
@@ -475,6 +493,7 @@ actor {
       timestamp = now;
       expiresAt = now + storyDuration;
       viewedBy = [];
+      viewCount = 0;
     };
 
     stories.add(storyId, story);
@@ -590,6 +609,7 @@ actor {
             let updatedStory = {
               story with
               viewedBy = story.viewedBy.concat([caller]);
+              viewCount = story.viewCount + 1;
             };
             stories.add(storyId, updatedStory);
 
@@ -2040,7 +2060,9 @@ actor {
   };
 
   // Social Features
-  public type Post = {
+
+  // Legacy post type (before embed and viewCount were added) – used for stable migration
+  type PostV1 = {
     id : Text;
     author : Principal;
     content : Text;
@@ -2048,7 +2070,19 @@ actor {
     image : ?Storage.ExternalBlob;
   };
 
-  var posts = Map.empty<Text, Post>();
+  public type Post = {
+    id : Text;
+    author : Principal;
+    content : Text;
+    timestamp : Time.Time;
+    image : ?Storage.ExternalBlob;
+    embed : ?Text;
+    viewCount : Nat;
+  };
+
+  // Stable array of current Post format (primary persistent storage)
+  var stablePostsV2 : [(Text, Post)] = [];
+  transient var posts = Map.empty<Text, Post>();
 
   // Pinned Trending Post
   // Only one post can be pinned at a time; stored as an optional post ID.
@@ -2149,8 +2183,10 @@ actor {
   var savesMap = Map.empty<Text, [SaveInteraction]>();
   var forwardsMap = Map.empty<Text, [ForwardInteraction]>();
   var postRoseGiftsMap = Map.empty<Text, [RoseGiftOnPost]>();
+  // Tracks which principals have viewed each post (for unique view counting)
+  var postViewersMap = Map.empty<Text, [Principal]>();
 
-  public shared ({ caller }) func createPost(content : Text, image : ?Storage.ExternalBlob) : async () {
+  public shared ({ caller }) func createPost(content : Text, image : ?Storage.ExternalBlob, embed : ?Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Debug.trap("Unauthorized: Only users can create posts");
     };
@@ -2161,12 +2197,14 @@ actor {
       content;
       timestamp = Time.now();
       image;
+      embed;
+      viewCount = 0;
     };
 
     posts.add(post.id, post);
   };
 
-  public shared ({ caller }) func editPost(postId : Text, content : Text, image : ?Storage.ExternalBlob) : async () {
+  public shared ({ caller }) func editPost(postId : Text, content : Text, image : ?Storage.ExternalBlob, embed : ?Text) : async () {
     if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
       Debug.trap("Unauthorized: Only users can edit posts");
     };
@@ -2180,6 +2218,7 @@ actor {
           post with
           content;
           image;
+          embed;
         };
         posts.add(postId, updatedPost);
       };
@@ -2205,6 +2244,7 @@ actor {
         savesMap.remove(postId);
         forwardsMap.remove(postId);
         postRoseGiftsMap.remove(postId);
+        postViewersMap.remove(postId);
         // Clear pin if the deleted post was pinned
         switch (pinnedTrendingPostId) {
           case (?pinnedId) {
@@ -2218,6 +2258,50 @@ actor {
       case null {
         Debug.trap("Post not found");
       };
+    };
+  };
+
+  // Record a post view and increment viewCount (each caller counted only once per post).
+  public shared ({ caller }) func recordPostView(postId : Text) : async () {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Debug.trap("Unauthorized: Only users can record post views");
+    };
+
+    switch (posts.get(postId)) {
+      case null {
+        Debug.trap("Post not found");
+      };
+      case (?post) {
+        // Only increment once per caller (use postViewersMap to track)
+        let alreadyViewed = switch (postViewersMap.get(postId)) {
+          case null { false };
+          case (?viewers) {
+            viewers.find(func(p : Principal) : Bool { p == caller }) != null
+          };
+        };
+        if (not alreadyViewed) {
+          // Track this viewer
+          switch (postViewersMap.get(postId)) {
+            case null { postViewersMap.add(postId, [caller]) };
+            case (?viewers) { postViewersMap.add(postId, viewers.concat([caller])) };
+          };
+          // Increment viewCount on the post
+          let updatedPost = { post with viewCount = post.viewCount + 1 };
+          posts.add(postId, updatedPost);
+        };
+      };
+    };
+  };
+
+  // Return the view count for a post.
+  public query ({ caller }) func getPostViewCount(postId : Text) : async Nat {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Debug.trap("Unauthorized: Only users can view post counts");
+    };
+
+    switch (posts.get(postId)) {
+      case null { 0 };
+      case (?post) { post.viewCount };
     };
   };
 
@@ -4113,4 +4197,26 @@ actor {
     groupMessages.add(groupId, updatedMessages);
     #ok
   };
+
+  // ── Stable variable migration ──────────────────────────────────────────────
+  // preupgrade: serialize transient in-memory maps to stable arrays so they
+  // survive the upgrade with the current Post/Story type shapes.
+  system func preupgrade() {
+    stablePostsV2 := posts.entries().toArray();
+    stableStoriesV2 := stories.entries().toArray();
+  };
+
+  // postupgrade: rebuild transient in-memory maps from stable arrays.
+  system func postupgrade() {
+    for ((k, v) in stablePostsV2.vals()) {
+      posts.add(k, v);
+    };
+    stablePostsV2 := [];
+
+    for ((k, v) in stableStoriesV2.vals()) {
+      stories.add(k, v);
+    };
+    stableStoriesV2 := [];
+  };
+
 };

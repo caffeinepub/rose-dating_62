@@ -78,6 +78,7 @@ type Story =
    expiresAt: Time;
    id: nat;
    timestamp: Time;
+   viewCount: nat;
    viewedBy: vec principal;
  };
 type ShoppingItem = 
@@ -164,9 +165,11 @@ type Post =
  record {
    author: principal;
    content: text;
+   embed: opt text;
    id: text;
    image: opt ExternalBlob;
    timestamp: Time;
+   viewCount: nat;
  };
 type NotificationType = 
  variant {
@@ -334,7 +337,7 @@ service : {
    cancelUrl: text) -> (text);
   createGroupChat: (name: text, initialParticipants: vec principal, avatar:
    opt ExternalBlob) -> (nat);
-  createPost: (content: text, image: opt ExternalBlob) -> ();
+  createPost: (content: text, image: opt ExternalBlob, embed: opt text) -> ();
   createStory: (content: MessageType) -> (nat);
   deleteCallerProfile: () -> ();
   deleteComment: (postId: text, commentId: nat) -> ();
@@ -360,7 +363,8 @@ service : {
       err: text;
       ok: Message;
     });
-  editPost: (postId: text, content: text, image: opt ExternalBlob) -> ();
+  editPost: (postId: text, content: text, image: opt ExternalBlob, embed:
+   opt text) -> ();
   filterProfiles: (filter: ProfileFilter) -> (vec ProfileWithPrincipal) query;
   followUser: (targetUser: principal) -> ();
   forwardGroupMessageToConversation: (sourceGroupId: nat, messageId: 
@@ -412,6 +416,7 @@ service : {
       saves: nat;
       totalRosesGifted: float64;
     }) query;
+  getPostViewCount: (postId: text) -> (nat) query;
   getPosts: () -> (vec Post) query;
   getPostsFromFollowedUsers: () -> (vec Post) query;
   getRoseBalance: () -> (float64) query;
@@ -467,6 +472,7 @@ service : {
       err: text;
       ok;
     });
+  recordPostView: (postId: text) -> ();
   removeGroupParticipant: (groupId: nat, participant: principal) -> ();
   requestBuyRoses: (amount: float64) -> (text);
   requestSellRoses: (amount: float64) -> (text);

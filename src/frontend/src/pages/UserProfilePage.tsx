@@ -14,6 +14,8 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import {
   ArrowLeft,
   Bookmark,
+  ChevronDown,
+  Eye,
   Heart,
   MessageCircle,
   MessageSquare,
@@ -448,9 +450,12 @@ function HighlightStoryModal({
 }
 
 // Highlights section — horizontal row of pinned story thumbnails
+const HIGHLIGHTS_PAGE_SIZE = 9;
+
 function HighlightsSection({ userId }: { userId: string }) {
   const { data: pinnedStories, isLoading } = useGetPinnedStories(userId);
   const [viewingStory, setViewingStory] = useState<Story | null>(null);
+  const [visibleCount, setVisibleCount] = useState(HIGHLIGHTS_PAGE_SIZE);
 
   if (isLoading) {
     return (
@@ -475,6 +480,9 @@ function HighlightsSection({ userId }: { userId: string }) {
 
   if (!pinnedStories || pinnedStories.length === 0) return null;
 
+  const visibleStories = pinnedStories.slice(0, visibleCount);
+  const hasMore = pinnedStories.length > visibleCount;
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
@@ -484,13 +492,14 @@ function HighlightsSection({ userId }: { userId: string }) {
         </h3>
       </div>
       <div className="flex gap-3 overflow-x-auto pb-2">
-        {pinnedStories.map((story) => {
+        {visibleStories.map((story) => {
           const thumbUrl =
             story.content.__kind__ === "image"
               ? story.content.image.getDirectURL()
               : story.content.__kind__ === "video"
                 ? story.content.video.getDirectURL()
                 : null;
+          const viewCount = story.viewedBy?.length ?? 0;
 
           return (
             <button
@@ -523,15 +532,33 @@ function HighlightsSection({ userId }: { userId: string }) {
                   )}
                 </div>
               </div>
-              <span className="text-xs text-muted-foreground max-w-[60px] truncate">
-                {new Date(
-                  Number(story.timestamp) / 1_000_000,
-                ).toLocaleDateString([], { month: "short", day: "numeric" })}
-              </span>
+              <div className="flex flex-col items-center gap-0.5">
+                <span className="text-xs text-muted-foreground max-w-[60px] truncate">
+                  {new Date(
+                    Number(story.timestamp) / 1_000_000,
+                  ).toLocaleDateString([], { month: "short", day: "numeric" })}
+                </span>
+                <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                  <Eye className="w-2.5 h-2.5" />
+                  {viewCount}
+                </span>
+              </div>
             </button>
           );
         })}
       </div>
+
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount((v) => v + HIGHLIGHTS_PAGE_SIZE)}
+          className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors font-medium"
+          data-ocid="highlights-view-more"
+        >
+          <ChevronDown className="w-3.5 h-3.5" />
+          View More ({pinnedStories.length - visibleCount} more)
+        </button>
+      )}
 
       <HighlightStoryModal
         story={viewingStory}
