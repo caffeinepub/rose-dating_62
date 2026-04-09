@@ -755,10 +755,30 @@ export default function GroupChatPage() {
     group?.admins.some((a) => a.toString() === currentPrincipal) ?? false;
   const isCreator = group?.creator.toString() === currentPrincipal;
   const allParticipants = group?.participants || [];
-  // sortedAllParticipants: sort by principal string (a stable sort proxy before profiles load)
-  const sortedAllParticipants = [...allParticipants].sort((a, b) =>
-    a.toString().localeCompare(b.toString()),
-  );
+  // sortedAllParticipants: sort alphabetically by display name via conversation profiles,
+  // falling back to principal string when a profile is not yet loaded.
+  const sortedAllParticipants = useMemo(() => {
+    const getDisplayName = (principalStr: string): string => {
+      // Try to find a matching profile from conversations
+      for (const conv of conversations) {
+        const other = conv.participants.find(
+          (p) => p.toString() === principalStr,
+        );
+        if (other && conv.otherParticipantProfile) {
+          const profile = conv.otherParticipantProfile;
+          return (
+            profile.name ||
+            profile.username ||
+            principalStr
+          ).toLowerCase();
+        }
+      }
+      return principalStr.toLowerCase();
+    };
+    return [...allParticipants].sort((a, b) =>
+      getDisplayName(a.toString()).localeCompare(getDisplayName(b.toString())),
+    );
+  }, [allParticipants, conversations]);
   const visibleParticipants = sortedAllParticipants.slice(0, visibleMembers);
   const hasMoreMembers = sortedAllParticipants.length > visibleMembers;
 

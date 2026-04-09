@@ -16,7 +16,6 @@ import {
   ChevronDown,
   Code2,
   Edit3,
-  Eye,
   Heart,
   Image as ImageIcon,
   Loader2,
@@ -76,14 +75,33 @@ function parseEmbed(content: string): {
 }
 
 function extractEmbedSrcFromCode(embedCode: string): string | null {
-  // Try to extract src from <iframe src="..."> or <blockquote data-...>
-  const srcMatch = embedCode.match(/src=["']([^"']+)["']/i);
-  if (srcMatch) return srcMatch[1];
-  // For X/Twitter blockquotes: extract the tweet URL
-  const hrefMatch = embedCode.match(
+  // TikTok: extract video ID from cite attribute in blockquote
+  const tiktokCiteMatch = embedCode.match(
+    /cite=["'](https:\/\/www\.tiktok\.com\/@[^/]+\/video\/(\d+))[^"']*["']/i,
+  );
+  if (tiktokCiteMatch) {
+    const videoId = tiktokCiteMatch[2];
+    return `https://www.tiktok.com/embed/v2/${videoId}`;
+  }
+
+  // X/Twitter blockquote: extract the tweet permalink URL
+  const twitterHrefMatch = embedCode.match(
+    /href=["'](https:\/\/(?:twitter|x)\.com\/[^/]+\/status\/(\d+)[^"'?]*)["']/i,
+  );
+  if (twitterHrefMatch) {
+    return twitterHrefMatch[1];
+  }
+
+  // Generic X/Twitter URL (not inside a blockquote)
+  const xUrlMatch = embedCode.match(
     /href=["'](https:\/\/(?:twitter|x)\.com\/[^"'?]+)["']/i,
   );
-  if (hrefMatch) return hrefMatch[1];
+  if (xUrlMatch) return xUrlMatch[1];
+
+  // Generic iframe src fallback
+  const srcMatch = embedCode.match(/src=["']([^"']+)["']/i);
+  if (srcMatch) return srcMatch[1];
+
   return null;
 }
 
@@ -109,7 +127,32 @@ function EmbedRenderer({ embedUrl }: { embedUrl: string }) {
   const type = detectEmbedType(embedUrl);
 
   if (type === "x") {
-    // X/Twitter — link card style since iframes are restricted
+    // Extract tweet ID from the URL for iframe embed
+    const tweetIdMatch = embedUrl.match(/\/status\/(\d+)/);
+    if (tweetIdMatch) {
+      const tweetId = tweetIdMatch[1];
+      const iframeSrc = `https://platform.twitter.com/embed/Tweet.html?id=${tweetId}`;
+      return (
+        <div
+          className="mt-2 mb-1 rounded-xl overflow-hidden w-full"
+          style={{ height: "320px" }}
+          data-ocid="post-embed-x"
+        >
+          <iframe
+            src={iframeSrc}
+            width="100%"
+            height="320px"
+            className="rounded-xl border-0 w-full"
+            allow="autoplay; encrypted-media; fullscreen"
+            allowFullScreen
+            loading="lazy"
+            title="X (Twitter) post"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+          />
+        </div>
+      );
+    }
+    // Fallback: link card
     return (
       <a
         href={embedUrl}
@@ -134,25 +177,12 @@ function EmbedRenderer({ embedUrl }: { embedUrl: string }) {
           </p>
           <p className="text-xs text-muted-foreground truncate">{embedUrl}</p>
         </div>
-        <svg
-          className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors flex-shrink-0"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-          />
-        </svg>
       </a>
     );
   }
 
   const isTikTok = type === "tiktok";
-  const height = isTikTok ? "560px" : "315px";
+  const height = isTikTok ? "700px" : "315px";
 
   return (
     <div
@@ -301,8 +331,6 @@ function PostInteractionsBar({
     }
   };
 
-  const viewCount = interactions ? Number(interactions.forwards) : 0;
-
   return (
     <div className="flex items-center gap-4 pt-2 border-t border-border/40">
       <button
@@ -334,15 +362,6 @@ function PostInteractionsBar({
         <Bookmark className={`w-4 h-4 ${saved ? "fill-amber-500" : ""}`} />
         <span>{isLoading ? "…" : Number(interactions?.saves ?? 0)}</span>
       </button>
-
-      {/* View count */}
-      <span
-        className="flex items-center gap-1 text-xs text-muted-foreground ml-auto"
-        data-ocid="post-view-count"
-      >
-        <Eye className="w-3.5 h-3.5" />
-        <span>{isLoading ? "…" : viewCount}</span>
-      </span>
     </div>
   );
 }

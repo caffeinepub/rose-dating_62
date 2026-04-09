@@ -16,12 +16,6 @@ import Debug "mo:base/Debug";
 import Buffer "mo:base/Buffer";
 import Runtime "mo:core/Runtime";
 import Iter "mo:core/Iter";
-import { migration } "RoseMigration";
-
-
-
-
-(with migration)
 actor {
   // Authorization
   let accessControlState = AccessControl.initState();

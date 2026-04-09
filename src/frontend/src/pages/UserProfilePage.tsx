@@ -480,7 +480,14 @@ function HighlightsSection({ userId }: { userId: string }) {
 
   if (!pinnedStories || pinnedStories.length === 0) return null;
 
-  const visibleStories = pinnedStories.slice(0, visibleCount);
+  // Sort newest first — use pinnedAt if available, fall back to story timestamp
+  const sortedStories = [...pinnedStories].sort((a, b) => {
+    const aTime = (a as Story & { pinnedAt?: bigint }).pinnedAt ?? a.timestamp;
+    const bTime = (b as Story & { pinnedAt?: bigint }).pinnedAt ?? b.timestamp;
+    return Number(bTime) - Number(aTime);
+  });
+
+  const visibleStories = sortedStories.slice(0, visibleCount);
   const hasMore = pinnedStories.length > visibleCount;
 
   return (
